@@ -1,10 +1,10 @@
 // Outreach Participation module definition. It keeps the ID, contract, setup version, capabilities, routes, jobs, Discord
 // commands, report datasets, tables and cleanup targets it had as a first-party module, so existing lifecycle rows, Operator
 // assignments, setup progress, saved reports and retained data stay valid.
-import { coreMemberReportFields, defineModuleManifest, reportFilterOperators, type ReportFieldDefinition } from "@lancerlogin/module-sdk";
+import { coreMemberReportFieldDefinitions, defineModuleManifest, reportFilterOperators, type ReportFieldDefinition } from "@lancerlogin/module-sdk";
 
 const outreachMemberFields: readonly ReportFieldDefinition[] = [
-  ...coreMemberReportFields,
+  ...coreMemberReportFieldDefinitions(),
   { id: "outreach.member.minutes", label: "Outreach minutes", group: "Outreach participation", kind: "measure", valueType: "number", sortable: true, filterOperators: reportFilterOperators("number"), durationUnits: ["minutes", "hours"], defaultDurationUnit: "hours" },
   { id: "outreach.member.entries", label: "Participation entries", group: "Outreach participation", kind: "measure", valueType: "number", sortable: true, filterOperators: reportFilterOperators("number") },
   { id: "outreach.member.activities", label: "Distinct activities", group: "Outreach participation", kind: "measure", valueType: "number", sortable: true, filterOperators: reportFilterOperators("number") },
