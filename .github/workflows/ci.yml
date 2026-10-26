@@ -1,0 +1,93 @@
+name: Verify
+# Verifies this plugin commit composed into the LancerLogin Core commit pinned in .github/plugin-release.json.
+# Releases and nightly builds require a successful run of this workflow for their exact commit on main.
+#
+# Repository secrets:
+#   LANCERLOGIN_CORE_TOKEN    required. A fine-grained token with Contents: read on isriah/LancerLogin-modular-dev
+#                             (private Core) and on isriah/lancerlogin-outreach (Core's official module).
+#   LANCERLOGIN_PLUGIN_TOKEN  optional. Read access to private plugin repositories Core composes; defaults to
+#                             LANCERLOGIN_CORE_TOKEN.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: docker://rhysd/actionlint:1.7.12
+        with:
+          args: -color
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Require read access to LancerLogin Core
+        env:
+          CORE_TOKEN: ${{ secrets.LANCERLOGIN_CORE_TOKEN }}
+        run: |
+          if [ -z "$CORE_TOKEN" ]; then
+            message="The LANCERLOGIN_CORE_TOKEN repository secret is not set. Create a fine-grained personal access token with Contents: read on isriah/LancerLogin-modular-dev and isriah/lancerlogin-outreach, then add it under Settings > Secrets and variables > Actions. See README.md, Continuous integration."
+            echo "::error title=LANCERLOGIN_CORE_TOKEN is not configured::$message"
+            echo "$message" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+      - name: Check out this plugin commit
+        uses: actions/checkout@v7
+        with:
+          path: plugin
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.21.0
+      - name: Run the plugin's own release-policy tests
+        working-directory: plugin
+        run: node --test "tests/*.test.mjs"
+      - name: Read the pinned Core commit
+        id: core
+        run: node plugin/scripts/verify-with-core.mjs core-pin >> "$GITHUB_OUTPUT"
+      - name: Check out the pinned LancerLogin Core commit
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ steps.core.outputs.repository }}
+          ref: ${{ steps.core.outputs.commit }}
+          token: ${{ secrets.LANCERLOGIN_CORE_TOKEN }}
+          path: core
+          persist-credentials: false
+      - name: Install Core dependencies
+        working-directory: core
+        run: npm ci --no-audit
+      - name: Read the locked Playwright version
+        id: playwright-version
+        working-directory: core
+        run: echo "version=$(node -p "require('playwright-core/package.json').version")" >> "$GITHUB_OUTPUT"
+      - name: Restore the Playwright browser for this Playwright version
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
+      - name: Install the Playwright browser and system dependencies
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        working-directory: core
+        run: npx playwright install --with-deps chromium
+      - name: Install Playwright system dependencies for the cached browser
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        working-directory: core
+        run: npx playwright install-deps chromium
+      - name: Verify this plugin commit composed into the pinned Core
+        env:
+          LANCERLOGIN_PLUGIN_TOKEN: ${{ secrets.LANCERLOGIN_PLUGIN_TOKEN || secrets.LANCERLOGIN_CORE_TOKEN }}
+        run: node plugin/scripts/verify-with-core.mjs --core core --mode acceptance
