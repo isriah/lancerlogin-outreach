@@ -41,7 +41,8 @@ jobs:
         if: steps.plan.outputs.publish != 'true'
         env:
           REASON: ${{ steps.plan.outputs.reason }}
-        run: printf 'No nightly build was published: %s\n' "$REASON" >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          printf 'No nightly build was published: %s\n' "$REASON" >> "$GITHUB_STEP_SUMMARY"
       - name: Publish the testing-only nightly prerelease
         if: steps.plan.outputs.publish == 'true'
         env:
