@@ -1,0 +1,36 @@
+import { useEffect, useId, useRef, useState } from "react";
+import type React from "react";
+import { useModalFocus } from "@lancerlogin/module-sdk/dashboard";
+import { resolveCivilTime, type CivilTimeOccurrence } from "@lancerlogin/module-sdk";
+
+const offsetLabel = (seconds: number) => `UTC${seconds < 0 ? "−" : "+"}${String(Math.floor(Math.abs(seconds) / 3600)).padStart(2, "0")}:${String(Math.floor(Math.abs(seconds) % 3600 / 60)).padStart(2, "0")}`;
+const parts = (time: string) => { const match = /^(\d\d):(\d\d)/.exec(time); const sourceHour = match ? Number(match[1]) : 12; return { hour: sourceHour % 12 || 12, minute: match ? Math.round(Number(match[2]) / 5) * 5 % 60 : 0, period: sourceHour >= 12 ? "PM" as const : "AM" as const }; };
+const value = (hour: number, minute: number, period: "AM" | "PM") => `${String(hour % 12 + (period === "PM" ? 12 : 0)).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+const display = (time: string) => { const current = parts(time); return `${current.hour}:${String(current.minute).padStart(2, "0")} ${current.period}`; };
+
+export function OutreachClock({ label, date, time, zone, occurrence, onTime, onOccurrence, disabled, showContext = false }: { label: string; date: string; time: string; zone: string; occurrence?: CivilTimeOccurrence; onTime: (time: string) => void; onOccurrence: (value?: CivilTimeOccurrence) => void; disabled: boolean; showContext?: boolean }) {
+  const id = useId(); const trigger = useRef<HTMLButtonElement>(null); const dialog = useRef<HTMLDivElement>(null); const [open, setOpen] = useState(false); const [phase, setPhase] = useState<"hour" | "minute" | "period">("hour"); const initial = parts(time); const [hour, setHour] = useState(initial.hour); const [minute, setMinute] = useState(initial.minute); const [period, setPeriod] = useState<"AM" | "PM">(initial.period);
+  let candidates: ReturnType<typeof resolveCivilTime> = []; let valid = false;
+  try { candidates = resolveCivilTime({ date, time, timeZone: zone }); valid = true; } catch { /* Incomplete input stays editable. */ }
+  const problem = valid && candidates.length === 0 ? "This local time does not exist because the clock changes. Choose another time." : valid && candidates.length > 1 && !occurrence ? "This time occurs twice. Choose the intended occurrence." : "";
+  const choose = (next: number) => { if (phase === "hour") { setHour(next); setPhase("minute"); } else if (phase === "minute") { setMinute(next); setPhase("period"); } };
+  const finish = (next: "AM" | "PM") => { setPeriod(next); onTime(value(hour, minute, next)); onOccurrence(undefined); setOpen(false); };
+  const adjust = (delta: number) => { if (phase === "hour") setHour((current) => (current - 1 + delta + 12) % 12 + 1); else if (phase === "minute") setMinute((current) => (current + delta * 5 + 60) % 60); };
+  // Modal cleanup restores focus once. A later frame must not steal a new target.
+  const close = () => { setOpen(false); };
+  useModalFocus(dialog, open, disabled, close);
+  useEffect(() => {
+    if (!open) return;
+    const dismissOutside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !dialog.current?.contains(event.target) && !trigger.current?.contains(event.target)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", dismissOutside);
+    return () => document.removeEventListener("pointerdown", dismissOutside);
+  }, [open]);
+  const openPicker = () => { const current = parts(time); setHour(current.hour); setMinute(current.minute); setPeriod(current.period); setPhase("hour"); setOpen(true); };
+  const numbers = phase === "hour" ? Array.from({ length: 12 }, (_, index) => index + 1) : Array.from({ length: 12 }, (_, index) => index * 5);
+  return <div className="outreach-stack"><div><span className="outreach-clock-label">{label}</span><button ref={trigger} type="button" className="ui-button outreach-clock-trigger" disabled={disabled} aria-label={`${label}: ${(time ? display(time) : "Choose time")}`} aria-haspopup="dialog" aria-expanded={open} aria-invalid={Boolean(problem)} aria-describedby={problem || showContext ? `${id}-help` : undefined} onKeyDown={event => { if (open && event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); } }} onClick={openPicker}>{(time ? display(time) : "Choose time")}</button></div>{(problem || showContext) && <p id={`${id}-help`}>{problem || `${date || "Choose a service date"} - ${zone}`}</p>}
+    {open && <div ref={dialog} className="outreach-clock-dialog" role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); } else if (["ArrowLeft", "ArrowDown"].includes(event.key)) { event.preventDefault(); adjust(-1); } else if (["ArrowRight", "ArrowUp"].includes(event.key)) { event.preventDefault(); adjust(1); } else if (event.key === "Enter") { event.preventDefault(); if (phase === "hour") setPhase("minute"); else if (phase === "minute") setPhase("period"); else finish(period); } }}><h3 id={`${id}-title`}>{label}</h3><div className="outreach-clock-readout"><button className="ui-button" type="button" aria-pressed={phase === "hour"} onClick={() => setPhase("hour")}>{hour}</button><span>:</span><button className="ui-button" type="button" aria-pressed={phase === "minute"} onClick={() => setPhase("minute")}>{String(minute).padStart(2, "0")}</button><button className="ui-button" type="button" aria-pressed={phase === "period"} onClick={() => setPhase("period")}>{period}</button></div>{phase !== "period" ? <div className="outreach-clock-face" role="group" aria-label={phase === "hour" ? "Choose hour" : "Choose minute"}>{numbers.map((number, index) => <button key={number} type="button" className={`ui-button outreach-clock-option${(phase === "hour" ? hour : minute) === number ? " selected" : ""}`} style={{ "--clock-index": index } as React.CSSProperties} aria-label={phase === "hour" ? `${number} o'clock` : `${number} minutes`} onClick={() => choose(number)}>{String(number).padStart(phase === "minute" ? 2 : 1, "0")}</button>)}</div> : <div className="outreach-clock-period" role="group" aria-label="Choose AM or PM"><button type="button" className={`ui-button${period === "AM" ? " selected" : ""}`} onClick={() => finish("AM")}>AM</button><button type="button" className={`ui-button${period === "PM" ? " selected" : ""}`} onClick={() => finish("PM")}>PM</button></div>}<div className="module-actions"><button className="ui-button" type="button" onClick={close}>Cancel</button>{phase !== "hour" && <button className="ui-button" type="button" onClick={() => setPhase(phase === "period" ? "minute" : "hour")}>Back</button>}</div></div>}
+    {candidates.length > 1 && <label>{label} occurrence<select className="ui-native-select" disabled={disabled} value={occurrence ?? ""} onChange={(event) => onOccurrence(event.target.value ? event.target.value as CivilTimeOccurrence : undefined)}><option value="">Choose occurrence</option><option value="earlier">First occurrence ({offsetLabel(candidates[0]!.offsetSeconds)})</option><option value="later">Second occurrence ({offsetLabel(candidates.at(-1)!.offsetSeconds)})</option></select></label>}
+  </div>;
+}

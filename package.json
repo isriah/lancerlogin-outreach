@@ -1,0 +1,36 @@
+{
+  "name": "lancerlogin-module-outreach",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Outreach Participation for LancerLogin Modular, packaged as an official module plugin.",
+  "license": "Apache-2.0",
+  "lancerlogin": {
+    "moduleId": "hour-tracking",
+    "contract": 1,
+    "core": ">=2.0.0-beta.11 <3.0.0",
+    "tablePrefix": "hours_",
+    "entries": {
+      "manifest": "./src/manifest.ts",
+      "api": "./src/api.ts",
+      "dashboard": "./src/dashboard.tsx"
+    },
+    "migrations": "./migrations",
+    "adoptedCoreMigrations": [
+      "0042_outreach_participation.sql",
+      "0043_outreach_member_participation.sql",
+      "0044_outreach_entry_review_guards.sql",
+      "0045_outreach_publication.sql",
+      "0047_outreach_activity_labels.sql",
+      "0048_outreach_publication_setting.sql",
+      "0056_outreach_public_workflow.sql",
+      "0064_outreach_event_date_edits.sql",
+      "0065_outreach_activity_edits.sql",
+      "0066_outreach_publication_snapshots.sql"
+    ]
+  },
+  "peerDependencies": {
+    "@lancerlogin/module-sdk": "^1.0.0",
+    "react": "^19.1.1"
+  }
+}
