@@ -19,7 +19,7 @@ Outreach is LancerLogin's first official plugin. Every installation build includ
 
 - Pins are always full commit SHAs. Tags and branches are refused. Choose a release, then pin the commit it points to.
 - From a LancerLogin Core checkout, `npm run plugins:resolve -- --selection path/to/lancerlogin.modules.json --track stable --module hour-tracking` writes the commit of the newest stable release into the selection. Use `--track beta` or `--track nightly` for the other tracks.
-- This repository is private. The installation's private deployment repository needs a `LANCERLOGIN_PLUGIN_TOKEN` secret with read access to it.
+- This repository is public, so the deployment repository needs no token to fetch this plugin. `LANCERLOGIN_PLUGIN_TOKEN` only matters for private plugins.
 
 ## Compatibility
 
@@ -51,7 +51,7 @@ Patch notes for each stable and beta release are in [docs/releases](docs/release
 
 Required repository secrets (**Settings > Secrets and variables > Actions**):
 
-- `LANCERLOGIN_CORE_TOKEN`: a fine-grained personal access token with **Contents: read** on `isriah/LancerLogin-modular-dev` and `isriah/lancerlogin-outreach` (Core composes the official Outreach plugin in every build). Without it, Verify fails at its first step with an error that names this secret.
+- `LANCERLOGIN_CORE_TOKEN`: a fine-grained personal access token with **Contents: read** on `isriah/LancerLogin-modular-dev`, the private Core repository. Without it, Verify fails at its first step with an error that names this secret. Public plugin repositories that Core composes, including the official Outreach plugin, need no token.
 - `LANCERLOGIN_PLUGIN_TOKEN` (optional): read access to private plugin repositories Core composes. It defaults to `LANCERLOGIN_CORE_TOKEN`.
 
 To test against a newer Core, update `core.commit` in `.github/plugin-release.json` in its own pull request.

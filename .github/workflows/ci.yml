@@ -4,7 +4,7 @@ name: Verify
 #
 # Repository secrets:
 #   LANCERLOGIN_CORE_TOKEN    required. A fine-grained token with Contents: read on isriah/LancerLogin-modular-dev
-#                             (private Core) and on isriah/lancerlogin-outreach (Core's official module).
+#                             (private Core). Public plugin repositories need no token.
 #   LANCERLOGIN_PLUGIN_TOKEN  optional. Read access to private plugin repositories Core composes; defaults to
 #                             LANCERLOGIN_CORE_TOKEN.
 on:
@@ -39,7 +39,7 @@ jobs:
           CORE_TOKEN: ${{ secrets.LANCERLOGIN_CORE_TOKEN }}
         run: |
           if [ -z "$CORE_TOKEN" ]; then
-            message="The LANCERLOGIN_CORE_TOKEN repository secret is not set. Create a fine-grained personal access token with Contents: read on isriah/LancerLogin-modular-dev and isriah/lancerlogin-outreach, then add it under Settings > Secrets and variables > Actions. See README.md, Continuous integration."
+            message="The LANCERLOGIN_CORE_TOKEN repository secret is not set. Create a fine-grained personal access token with Contents: read on isriah/LancerLogin-modular-dev, then add it under Settings > Secrets and variables > Actions. See README.md, Continuous integration."
             echo "::error title=LANCERLOGIN_CORE_TOKEN is not configured::$message"
             echo "$message" >> "$GITHUB_STEP_SUMMARY"
             exit 1
