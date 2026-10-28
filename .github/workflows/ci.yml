@@ -2,11 +2,10 @@ name: Verify
 # Verifies this plugin commit composed into the LancerLogin Core commit pinned in .github/plugin-release.json.
 # Releases and nightly builds require a successful run of this workflow for their exact commit on main.
 #
-# Repository secrets:
-#   LANCERLOGIN_CORE_TOKEN    required. A fine-grained token with Contents: read on isriah/LancerLogin-modular-dev
-#                             (private Core). Public plugin repositories need no token.
-#   LANCERLOGIN_PLUGIN_TOKEN  optional. Read access to private plugin repositories Core composes; defaults to
-#                             LANCERLOGIN_CORE_TOKEN.
+# The pinned Core is the public isriah/LancerLogin repository and every plugin it composes is public, so no repository
+# secret is needed. Two optional secrets exist only for a Core pin that is private again:
+#   LANCERLOGIN_CORE_TOKEN    Contents: read on a private Core repository. Used for the Core checkout when set.
+#   LANCERLOGIN_PLUGIN_TOKEN  read access to private plugin repositories that Core composes. Used when set.
 on:
   push:
     branches: [main]
@@ -34,16 +33,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - name: Require read access to LancerLogin Core
-        env:
-          CORE_TOKEN: ${{ secrets.LANCERLOGIN_CORE_TOKEN }}
-        run: |
-          if [ -z "$CORE_TOKEN" ]; then
-            message="The LANCERLOGIN_CORE_TOKEN repository secret is not set. Create a fine-grained personal access token with Contents: read on isriah/LancerLogin-modular-dev, then add it under Settings > Secrets and variables > Actions. See README.md, Continuous integration."
-            echo "::error title=LANCERLOGIN_CORE_TOKEN is not configured::$message"
-            echo "$message" >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
       - name: Check out this plugin commit
         uses: actions/checkout@v7
         with:
@@ -58,12 +47,12 @@ jobs:
       - name: Read the pinned Core commit
         id: core
         run: node plugin/scripts/verify-with-core.mjs core-pin >> "$GITHUB_OUTPUT"
-      - name: Check out the pinned LancerLogin Core commit
+      - name: Check out the pinned LancerLogin Core commit ${{ steps.core.outputs.tag }}
         uses: actions/checkout@v7
         with:
           repository: ${{ steps.core.outputs.repository }}
           ref: ${{ steps.core.outputs.commit }}
-          token: ${{ secrets.LANCERLOGIN_CORE_TOKEN }}
+          token: ${{ secrets.LANCERLOGIN_CORE_TOKEN || github.token }}
           path: core
           persist-credentials: false
       - name: Install Core dependencies
@@ -89,5 +78,5 @@ jobs:
         run: npx playwright install-deps chromium
       - name: Verify this plugin commit composed into the pinned Core
         env:
-          LANCERLOGIN_PLUGIN_TOKEN: ${{ secrets.LANCERLOGIN_PLUGIN_TOKEN || secrets.LANCERLOGIN_CORE_TOKEN }}
+          LANCERLOGIN_PLUGIN_TOKEN: ${{ secrets.LANCERLOGIN_PLUGIN_TOKEN }}
         run: node plugin/scripts/verify-with-core.mjs --core core --mode acceptance

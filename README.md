@@ -47,16 +47,13 @@ Patch notes for each stable and beta release are in [docs/releases](docs/release
 
 ## Continuous integration
 
-**Verify** (`.github/workflows/ci.yml`) runs on every push to `main`, every pull request and on demand. It checks out the LancerLogin Core commit pinned in `.github/plugin-release.json` from the private `isriah/LancerLogin-modular-dev` repository, composes this plugin commit into it and runs Core's acceptance module gate for `hour-tracking` (`npm run verify:module -- acceptance hour-tracking`): the plugin's Core-side tests, browser specs, typechecks and builds. Plugin tests cannot skip in CI.
+**Verify** (`.github/workflows/ci.yml`) runs on every push to `main`, every pull request and on demand. It checks out the LancerLogin Core commit pinned in `.github/plugin-release.json` from the public [isriah/LancerLogin](https://github.com/isriah/LancerLogin) repository (currently Modular `v2.0.0-beta.12`, pinned by its full commit SHA; the tag is recorded beside it for people), composes this plugin commit into it and runs Core's acceptance module gate for `hour-tracking` (`npm run verify:module -- acceptance hour-tracking`): the plugin's Core-side tests, browser specs, typechecks and builds. Plugin tests cannot skip in CI.
 
-Required repository secrets (**Settings > Secrets and variables > Actions**):
+No repository secrets are needed. Core and every plugin it composes are public; `scripts/verify-with-core.mjs` clones the other plugins Core pins anonymously. Two optional secrets are used only when set, for a Core pin that is ever private again: `LANCERLOGIN_CORE_TOKEN` (Contents: read on that Core repository) and `LANCERLOGIN_PLUGIN_TOKEN` (read access to private plugin repositories that Core composes).
 
-- `LANCERLOGIN_CORE_TOKEN`: a fine-grained personal access token with **Contents: read** on `isriah/LancerLogin-modular-dev`, the private Core repository. Without it, Verify fails at its first step with an error that names this secret. Public plugin repositories that Core composes, including the official Outreach plugin, need no token.
-- `LANCERLOGIN_PLUGIN_TOKEN` (optional): read access to private plugin repositories Core composes. It defaults to `LANCERLOGIN_CORE_TOKEN`.
+To test against a newer Core release, update `core.commit` (the full commit SHA of the release tag) and `core.tag` in `.github/plugin-release.json` in its own pull request.
 
-To test against a newer Core, update `core.commit` in `.github/plugin-release.json` in its own pull request.
-
-Run the same gate locally from a clean commit with a Core checkout beside it: `npm run verify:core -- ../LancerLogin-modular-dev` (add `--mode fast` for the logic tests only). The plugin's own release-policy tests run with `npm test`.
+Run the same gate locally from a clean commit with a Core checkout beside it: `git clone https://github.com/isriah/LancerLogin.git ../LancerLogin`, `git -C ../LancerLogin checkout <core.commit>`, `npm ci` in that checkout, then `npm run verify:core -- ../LancerLogin` (add `--mode fast` for the logic tests only). The plugin's own release-policy tests run with `npm test`. For writing plugins, see `docs/PLUGIN-AUTHORING.md` in isriah/LancerLogin (available from the next Modular release).
 
 ## Releasing
 
