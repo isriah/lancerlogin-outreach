@@ -26,7 +26,7 @@ Outreach is LancerLogin's first official plugin. Every installation build includ
 | Plugin | LancerLogin Core | Module contract |
 | --- | --- | --- |
 | 1.0.x | `>=2.0.0-beta.11 <3.0.0` (Modular 2.0.0-beta.11 and later 2.x releases) | 1 |
-| Unreleased | `>=2.0.0-beta.15 <3.0.0` (Modular 2.0.0-beta.15, the first Core with module SDK 1.1.0, and later 2.x releases) | 1 |
+| 1.1.x | `>=2.0.0-beta.15 <3.0.0` (Modular 2.0.0-beta.15, the first Core with module SDK 1.1.0, and later 2.x releases) | 1 |
 
 The supported Core range is the `lancerlogin.core` field in `package.json`. Composition refuses this plugin for a Core outside that range, before an installation build or web update starts. React and `@lancerlogin/module-sdk` are peer dependencies provided by Core; the `@lancerlogin/module-sdk` range also refuses a Core whose SDK is too old.
 
