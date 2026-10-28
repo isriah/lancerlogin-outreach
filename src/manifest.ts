@@ -95,6 +95,16 @@ const manifest = defineModuleManifest({
     { path: "/admin/hours", match: "prefix", access: "workspace" },
     { path: "/public/hours", match: "prefix", access: "service" },
   ],
+  // Other modules (such as Guest Visits) record team support through this interface, with an Administrator's grant or a
+  // signed-in user who can manage Outreach. Each operation is idempotent.
+  interfaces: [{
+    id: "hour-tracking.team-support", version: 1, label: "Outreach team support",
+    operations: [
+      { id: "find-teams", label: "Look up Outreach supported teams by number and program", capability: "hours.manage", grantable: true },
+      { id: "ensure-team", label: "Create Outreach supported teams", capability: "hours.manage", grantable: true },
+      { id: "ensure-team-support-activity", label: "Create Team Support activities for supported teams", capability: "hours.manage", grantable: true },
+    ],
+  }],
   tablePrefix: "hours_",
   persistence: {
     tables: [

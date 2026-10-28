@@ -26,8 +26,13 @@ Outreach is LancerLogin's first official plugin. Every installation build includ
 | Plugin | LancerLogin Core | Module contract |
 | --- | --- | --- |
 | 1.0.x | `>=2.0.0-beta.11 <3.0.0` (Modular 2.0.0-beta.11 and later 2.x releases) | 1 |
+| Unreleased | `>=2.0.0-beta.15 <3.0.0` (Modular 2.0.0-beta.15, the first Core with module SDK 1.1.0, and later 2.x releases) | 1 |
 
-The supported Core range is the `lancerlogin.core` field in `package.json`. Composition refuses this plugin for a Core outside that range, before an installation build or web update starts. React and `@lancerlogin/module-sdk` are peer dependencies provided by Core.
+The supported Core range is the `lancerlogin.core` field in `package.json`. Composition refuses this plugin for a Core outside that range, before an installation build or web update starts. React and `@lancerlogin/module-sdk` are peer dependencies provided by Core; the `@lancerlogin/module-sdk` range also refuses a Core whose SDK is too old.
+
+## Team support for other modules
+
+Outreach provides the `hour-tracking.team-support` interface (version 1) so other modules, such as Guest Visits, can record team support without touching Outreach's tables. Its operations find supported teams by number and program, create a supported team when none matches, and create the one Team Support activity for a team and date. Each operation is idempotent and refuses archived teams. A module uses it only with an Administrator's grant in **Settings > Modules > Module access**, or for a signed-in user who can manage Outreach. Outreach records each creation in the audit log with the calling module.
 
 ## Release tracks
 

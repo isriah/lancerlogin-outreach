@@ -13,6 +13,7 @@ import { outreachPublicationRoute, processOutreachPublicationOperations } from "
 import { outreachPublicationProviders } from "./api/outreach-publication-providers.ts";
 import { outreachLabelFilterOptions, outreachReportHandlers } from "./api/outreach-reporting.ts";
 import { outreachReviewRoute } from "./api/outreach-review.ts";
+import { ensureSupportedTeam, ensureTeamSupportActivity, findSupportedTeams } from "./api/outreach-team-support.ts";
 
 const defaultCategories = [["event", "Event", "event"], ["team-support", "Team Support", "team"], ["other-service", "Other Service", "task"]] as const;
 
@@ -72,6 +73,13 @@ const api = defineApiModule({
   reports: outreachReportHandlers,
   reportFilters: { "outreach-labels": { options: outreachLabelFilterOptions } },
   discord: outreachDiscordHandlers,
+  interfaces: {
+    "hour-tracking.team-support": {
+      "find-teams": ({ db }, input) => findSupportedTeams(db, input),
+      "ensure-team": ({ db, caller }, input) => ensureSupportedTeam(db, caller, input),
+      "ensure-team-support-activity": ({ db, caller }, input) => ensureTeamSupportActivity(db, caller, input),
+    },
+  },
   // Roster members with participation history cannot be deleted; Core asks Admins to deactivate them instead.
   rosterReferences: { label: "Outreach", columns: [{ table: "hours_entries", column: "member_id" }, { table: "hours_correction_requests", column: "requester_member_id" }] },
   cleanup: { steps: outreachCleanupSteps, blocker: { sql: outreachCleanupBlocker, bindings: (installationId) => [installationId] } },
