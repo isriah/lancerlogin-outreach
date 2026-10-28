@@ -4,7 +4,7 @@ All notable changes to the LancerLogin Outreach plugin. Versions follow LancerLo
 
 ## [Unreleased]
 
-- Added the `hour-tracking.team-support` interface so other modules, with an Administrator's grant, can find or create supported teams and Team Support activities. Requires module SDK 1.1.0.
+- Added the `hour-tracking.team-support` interface so other modules, with an Administrator's grant, can find or create supported teams and Team Support activities. Requires LancerLogin Core `>=2.0.0-beta.15 <3.0.0` (module SDK 1.1.0).
 
 ## [1.0.0] - 2026-10-26
 
