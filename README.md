@@ -30,6 +30,15 @@ Outreach is LancerLogin's first official plugin. Every installation build includ
 
 The supported Core range is the `lancerlogin.core` field in `package.json`. Composition refuses this plugin for a Core outside that range, before an installation build or web update starts. React and `@lancerlogin/module-sdk` are peer dependencies provided by Core; the `@lancerlogin/module-sdk` range also refuses a Core whose SDK is too old.
 
+## Member self-logging
+
+On the public form, a member chooses what they are logging: a **Scheduled activity** Staff created (a dated activity), **Team support** or **Other service**. Team support and Other service take a service date inside the reporting window and a duration in whole minutes (1 to 1440), with no start or end time, and count immediately; Staff can edit or void them like any entry.
+
+- **Team support** names a team on the supported teams list, or a new team by number, program and name. A new team is matched to an existing one by number and program, ignoring letter case and surrounding spaces, and is otherwise added to the list flagged as added by a member. **Settings > Outreach > Supported teams** shows the flag, filters to member-added teams and lets Staff mark one reviewed. The entry joins the Team Support activity for that team and date, which is created when there is none.
+- **Other service** takes a short description (up to 150 characters), such as "STEM tutoring". The entry joins the Other Service activity with that title on that date, created when there is none, and keeps the description in its notes.
+
+Duration-only entries store their interval anchored at the start of the service day so totals, receipts and history are unchanged, and they never count as overlapping other participation. Reports show no start or end time for them.
+
 ## Team support for other modules
 
 Outreach provides the `hour-tracking.team-support` interface (version 1) so other modules, such as Guest Visits, can record team support without touching Outreach's tables. Its operations find supported teams by number and program, create a supported team when none matches, and create the one Team Support activity for a team and date. Each operation is idempotent and refuses archived teams. A module uses it only with an Administrator's grant in **Settings > Modules > Module access**, or for a signed-in user who can manage Outreach. Outreach records each creation in the audit log with the calling module.
