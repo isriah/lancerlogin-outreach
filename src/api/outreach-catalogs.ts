@@ -82,10 +82,15 @@ function pageInput(url: URL, extra: string[] = []) {
 }
 
 async function list(db: D1Database, kind: CatalogKind, url: URL): Promise<RouteResult> {
-  const extra = kind === "activities" ? ["from", "to", "mode", "teamId", "labelIds", "labelMatch"] : ["q"];
+  const extra = kind === "activities" ? ["from", "to", "mode", "teamId", "labelIds", "labelMatch"] : kind === "teams" ? ["q", "addedBy"] : ["q"];
   const { limit, after, archived } = pageInput(url, extra);
   const clauses = ["installation_id=?", "id>?"]; const values: unknown[] = [installationId, after];
   if (archived !== "all") { clauses.push("archived=?"); values.push(Number(archived === "true")); }
+  // Teams members added from the public form and Staff have not yet reviewed.
+  if (kind === "teams" && url.searchParams.has("addedBy")) {
+    if (url.searchParams.get("addedBy") !== "member") throw new HttpError(400, "Invalid supported team source filter");
+    clauses.push("added_by_member=1");
+  }
   if (kind !== "activities") {
     const query = text(url.searchParams.get("q") ?? "", 100);
     const fields = kind === "teams" ? "name||' '||number||' '||program" : "name";
@@ -113,7 +118,7 @@ async function list(db: D1Database, kind: CatalogKind, url: URL): Promise<RouteR
       if (labelMatch === "all") values.push(unique.length);
     }
   }
-  const selection = kind === "teams" ? `SELECT t.installation_id,t.id,t.number,t.name,t.program,t.archived,t.revision,t.created_at,t.updated_at,
+  const selection = kind === "teams" ? `SELECT t.installation_id,t.id,t.number,t.name,t.program,t.archived,t.revision,t.created_at,t.updated_at,t.added_by_member,
     COALESCE((SELECT COUNT(DISTINCT e.member_id) FROM hours_activities a JOIN hours_entries e ON e.installation_id=a.installation_id AND e.activity_id=a.id WHERE a.installation_id=t.installation_id AND a.team_id=t.id AND a.mode='team' AND e.status='counted'),0) AS participant_count,
     COALESCE((SELECT SUM(e.duration_minutes) FROM hours_activities a JOIN hours_entries e ON e.installation_id=a.installation_id AND e.activity_id=a.id WHERE a.installation_id=t.installation_id AND a.team_id=t.id AND a.mode='team' AND e.status='counted'),0) AS counted_minutes
     FROM hours_teams t` : kind === "activities" ? `SELECT hours_activities.*,
@@ -122,13 +127,13 @@ async function list(db: D1Database, kind: CatalogKind, url: URL): Promise<RouteR
        WHERE al.installation_id=hours_activities.installation_id AND al.activity_id=hours_activities.id ORDER BY l.name,l.id) labels),'[]') AS labels_json
     FROM hours_activities` : `SELECT * FROM ${tables[kind]}`;
   const rows = (await db.prepare(`${selection} WHERE ${clauses.join(" AND ")} ORDER BY id LIMIT ?`).bind(...values, limit + 1).all<Row>()).results ?? [];
-  let counts: { total: number; activeCount: number; archivedCount: number } | undefined;
+  let counts: { total: number; activeCount: number; archivedCount: number; memberAddedCount?: number } | undefined;
   if (kind !== "activities") {
     const total = await db.prepare(`SELECT COUNT(*) AS total FROM ${tables[kind]} WHERE ${clauses.filter(clause => clause !== "id>?").join(" AND ")}`).bind(...values.filter((_, index) => index !== 1)).first<{ total: number }>();
-    const all = await db.prepare(`SELECT SUM(CASE WHEN archived=0 THEN 1 ELSE 0 END) AS activeCount,SUM(CASE WHEN archived=1 THEN 1 ELSE 0 END) AS archivedCount FROM ${tables[kind]} WHERE installation_id=?`).bind(installationId).first<{ activeCount: number; archivedCount: number }>();
-    counts = { total: total?.total ?? 0, activeCount: all?.activeCount ?? 0, archivedCount: all?.archivedCount ?? 0 };
+    const all = await db.prepare(`SELECT SUM(CASE WHEN archived=0 THEN 1 ELSE 0 END) AS activeCount,SUM(CASE WHEN archived=1 THEN 1 ELSE 0 END) AS archivedCount${kind === "teams" ? ",SUM(added_by_member) AS memberAddedCount" : ""} FROM ${tables[kind]} WHERE installation_id=?`).bind(installationId).first<{ activeCount: number; archivedCount: number; memberAddedCount?: number }>();
+    counts = { total: total?.total ?? 0, activeCount: all?.activeCount ?? 0, archivedCount: all?.archivedCount ?? 0, ...kind === "teams" ? { memberAddedCount: Number(all?.memberAddedCount ?? 0) } : {} };
   }
-  return { status: 200, body: { items: rows.slice(0, limit).map(serialize), nextCursor: rows.length > limit ? rows[limit - 1]!.id : null, ...counts } };
+  return { status: 200, body: { items: rows.slice(0, limit).map(serialize).map((item) => kind === "teams" ? withTeamSource(item) : item), nextCursor: rows.length > limit ? rows[limit - 1]!.id : null, ...counts } };
 }
 
 async function detail(db: D1Database, kind: CatalogKind, id: string): Promise<RouteResult> {
@@ -136,11 +141,14 @@ async function detail(db: D1Database, kind: CatalogKind, id: string): Promise<Ro
     COALESCE((SELECT json_group_array(json_object('id',labels.id,'name',labels.name,'archived',json(labels.archived))) FROM
       (SELECT l.id,l.name,l.archived FROM hours_activity_labels al JOIN hours_labels l ON l.installation_id=al.installation_id AND l.id=al.label_id
        WHERE al.installation_id=hours_activities.installation_id AND al.activity_id=hours_activities.id ORDER BY l.name,l.id) labels),'[]') AS labels_json
-    FROM hours_activities` : kind === "teams" ? "SELECT installation_id,id,number,name,program,archived,revision,created_at,updated_at FROM hours_teams" : `SELECT * FROM ${tables[kind]}`;
+    FROM hours_activities` : kind === "teams" ? "SELECT installation_id,id,number,name,program,archived,revision,created_at,updated_at,added_by_member FROM hours_teams" : `SELECT * FROM ${tables[kind]}`;
   const row = await db.prepare(`${selection} WHERE installation_id=? AND id=?`).bind(installationId, id).first<Row>();
   if (!row) throw new HttpError(404, "Outreach record not found");
-  return { status: 200, body: serialize(row) };
+  return { status: 200, body: kind === "teams" ? withTeamSource(serialize(row)) : serialize(row) };
 }
+
+/** Supported teams report whether a member added them from the public form and Staff have not yet reviewed them. */
+function withTeamSource(item: Row) { return { ...item, addedByMember: Boolean(item.addedByMember) }; }
 
 async function write(db: D1Database, actor: string, kind: CatalogKind, id: string | undefined, input: unknown, publicationProviders?: OutreachPublicationProviders, nowMs = Date.now()): Promise<RouteResult> {
   if (!object(input)) throw new HttpError(400, "Provide an Outreach record");
@@ -148,7 +156,7 @@ async function write(db: D1Database, actor: string, kind: CatalogKind, id: strin
   if (id && !existing) throw new HttpError(404, "Outreach record not found");
   const current = existing ? serialize(existing) : {}; const next = { ...current, ...input }; const now = new Date(nowMs).toISOString(); const target = id ?? crypto.randomUUID();
   const common = ["revision", "archived"];
-  const fields = kind === "labels" ? ["name"] : kind === "teams" ? ["number", "name", "program"] : ["mode", "labelIds", "serviceDate", "teamId", "title", "description", "location", "impactRelevant", "eventStartLocal", "eventEndLocal", "eventStartOccurrence", "eventEndOccurrence"];
+  const fields = kind === "labels" ? ["name"] : kind === "teams" ? ["number", "name", "program", "addedByMember"] : ["mode", "labelIds", "serviceDate", "teamId", "title", "description", "location", "impactRelevant", "eventStartLocal", "eventEndLocal", "eventStartOccurrence", "eventEndOccurrence"];
   if (Object.keys(input).some((key) => ![...common, ...fields].includes(key)) || !id && "revision" in input) throw new HttpError(400, "Unknown Outreach catalog field");
   const expected = id ? revision(input.revision) : 0; const row: Row = { archived: flag(next.archived ?? false) };
   let additional = ""; let additionalValues: unknown[] = []; let publicationQueue: OutreachPublicationQueueResult | undefined; let queueAutomatically = false;
@@ -159,6 +167,11 @@ async function write(db: D1Database, actor: string, kind: CatalogKind, id: strin
   } else if (kind === "teams") {
     if ((!id || "program" in input) && !outreachPrograms.includes(next.program as typeof outreachPrograms[number])) throw new HttpError(400, "Choose Explore, Challenge, FTC, or FRC as the team program");
     row.name = text(next.name, 150, true); row.number = text(next.number ?? "", 32); row.program = text(next.program ?? "", 100);
+    // Staff can mark a member-added team reviewed, which clears its flag. Only members add the flag, through the public form.
+    if ("addedByMember" in input) {
+      if (input.addedByMember !== false || !id) throw new HttpError(400, "Staff can only mark a member-added team reviewed");
+      row.added_by_member = 0;
+    }
   } else {
     const mode = text(next.mode, 10, true) as keyof typeof categoryByMode;
     if (!(mode in categoryByMode)) throw new HttpError(400, "Invalid activity mode");
@@ -207,7 +220,8 @@ async function write(db: D1Database, actor: string, kind: CatalogKind, id: strin
   let results;
   try {
     const changesLabels = kind === "activities" && (!id || "labelIds" in input);
-    const statements = [statement, db.prepare("INSERT INTO audit_log(id,installation_id,actor_user_id,action,target_type,target_id,metadata_json,created_at) SELECT ?,?,?,?,'outreach_catalog',?,?,? WHERE changes()=1").bind(auditId, installationId, actor, `outreach.${kind}.${id ? "updated" : "created"}`, target, JSON.stringify({ revision: id ? expected + 1 : 0, archived: Boolean(row.archived), ...(changesLabels ? { labelIds: labelIds(next.labelIds ?? []) } : {}) }), now)];
+    const reviewed = kind === "teams" && row.added_by_member === 0 && Boolean(existing?.added_by_member);
+    const statements = [statement, db.prepare("INSERT INTO audit_log(id,installation_id,actor_user_id,action,target_type,target_id,metadata_json,created_at) SELECT ?,?,?,?,'outreach_catalog',?,?,? WHERE changes()=1").bind(auditId, installationId, actor, `outreach.${kind}.${id ? "updated" : "created"}`, target, JSON.stringify({ revision: id ? expected + 1 : 0, archived: Boolean(row.archived), ...(changesLabels ? { labelIds: labelIds(next.labelIds ?? []) } : {}), ...(reviewed ? { memberAdditionReviewed: true } : {}) }), now)];
     if (kind === "activities" && existing?.mode === "event" && (row.mode !== "event" || row.archived)) statements.push(db.prepare("UPDATE hours_publication_operations SET status='failed',next_attempt_at=NULL,last_error='Activity is no longer eligible for Event publication',lease_token=NULL,lease_expires_at=NULL,updated_at=? WHERE installation_id=? AND activity_id=? AND action='publish' AND status IN ('pending','failed') AND EXISTS(SELECT 1 FROM audit_log WHERE installation_id=? AND id=?)").bind(now, installationId, target, installationId, auditId));
     if (changesLabels) {
       const selectedLabelIds = labelIds(next.labelIds ?? []);

@@ -1,10 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { registerHooks } from "node:module";
+import "./helpers/sdk.mjs";
 import { outreachDatabase } from "./helpers/d1.mjs";
 
-const stub = new URL("./helpers/module-sdk-stub.mjs", import.meta.url).href;
-registerHooks({ resolve: (specifier, context, next) => specifier === "@lancerlogin/module-sdk/api" ? { url: stub, shortCircuit: true } : next(specifier, context) });
 const { ensureSupportedTeam, ensureTeamSupportActivity, findSupportedTeams } = await import("../src/api/outreach-team-support.ts");
 const viaGrant = { moduleId: "visits", grantId: "grant-1" };
 const count = (db, sql) => db.raw.prepare(sql).get().n;

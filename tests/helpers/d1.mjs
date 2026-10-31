@@ -1,26 +1,56 @@
-// A D1-shaped adapter over Node's built-in SQLite, with the Outreach tables these tests need. Batches run in one
-// transaction, as D1 batches do.
+// A D1-shaped adapter over Node's built-in SQLite. The database has the Core tables Outreach reads, the hours_* schema
+// Core's adopted Outreach migrations produce (tests/fixtures/core-hours-schema.sql), and then this plugin's own migrations,
+// applied in order as an installation applies them. Batches run in one transaction, as D1 batches do.
+import { readdirSync, readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 
-export function outreachDatabase() {
+const root = new URL("../../", import.meta.url);
+export const pluginMigrations = () => JSON.parse(readFileSync(new URL("migrations/reviewed.json", root), "utf8")).map(({ name }) => ({ name, sql: readFileSync(new URL(`migrations/${name}`, root), "utf8") }));
+
+const coreTables = `
+  CREATE TABLE installations (id TEXT PRIMARY KEY, created_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00.000Z');
+  CREATE TABLE users (id TEXT PRIMARY KEY);
+  CREATE TABLE meetings (id TEXT PRIMARY KEY);
+  CREATE TABLE members (id TEXT PRIMARY KEY, installation_id TEXT NOT NULL REFERENCES installations(id), external_id TEXT NOT NULL, first_name TEXT NOT NULL, last_name TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1, discord_user_id TEXT);
+  CREATE TABLE organization_settings (installation_id TEXT PRIMARY KEY REFERENCES installations(id), time_zone TEXT NOT NULL, organization_name TEXT NOT NULL DEFAULT 'Synthetic Robotics', subtitle TEXT, logo_data TEXT, primary_color TEXT NOT NULL DEFAULT '#123456', secondary_color TEXT NOT NULL DEFAULT '#654321', logo_backdrop TEXT NOT NULL DEFAULT 'auto');
+  CREATE TABLE audit_log (id TEXT PRIMARY KEY, installation_id TEXT NOT NULL REFERENCES installations(id), actor_user_id TEXT REFERENCES users(id), action TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT, metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
+`;
+
+/** Rows a freshly enabled installation has (the plugin's freshEnable), plus synthetic members and an admin. */
+const installationRows = `
+  INSERT INTO installations(id) VALUES ('primary'); INSERT INTO users VALUES ('admin');
+  INSERT INTO organization_settings(installation_id,time_zone) VALUES ('primary','America/New_York');
+  INSERT INTO members(id,installation_id,external_id,first_name,last_name) VALUES ('member-a','primary','TEST-A','Test Student','A'),('member-b','primary','TEST-B','Test Student','B');
+  INSERT INTO hours_entry_settings(installation_id) VALUES ('primary');
+  INSERT INTO hours_public_form_settings(installation_id,updated_at) VALUES ('primary','2026-01-01T00:00:00.000Z');
+  INSERT INTO hours_publication_settings(installation_id,automatic,revision,created_at,updated_at) VALUES ('primary',0,0,'2026-01-01','2026-01-01');
+  INSERT INTO hours_categories(installation_id,id,name,mode,impact_default,created_at,updated_at) VALUES
+    ('primary','event','Event','event',1,'2026-01-01','2026-01-01'),
+    ('primary','team-support','Team Support','team',1,'2026-01-01','2026-01-01'),
+    ('primary','other-service','Other Service','task',1,'2026-01-01','2026-01-01');
+`;
+
+/** The database as Core's adopted migrations left it, before this plugin's migrations. */
+export function coreBaselineDatabase() {
   const raw = new DatabaseSync(":memory:");
-  raw.exec(`
-    CREATE TABLE installations (id TEXT PRIMARY KEY);
-    CREATE TABLE users (id TEXT PRIMARY KEY);
-    INSERT INTO installations VALUES ('primary'); INSERT INTO users VALUES ('admin');
-    CREATE TABLE audit_log (id TEXT PRIMARY KEY, installation_id TEXT NOT NULL REFERENCES installations(id), actor_user_id TEXT REFERENCES users(id), action TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT, metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
-    CREATE TABLE hours_categories (installation_id TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL, mode TEXT NOT NULL, impact_default INTEGER NOT NULL DEFAULT 1, archived INTEGER NOT NULL DEFAULT 0, revision INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(installation_id,id));
-    CREATE TABLE hours_teams (installation_id TEXT NOT NULL, id TEXT NOT NULL, number TEXT NOT NULL DEFAULT '', name TEXT NOT NULL, program TEXT NOT NULL DEFAULT '', historical_descriptors TEXT NOT NULL DEFAULT '', archived INTEGER NOT NULL DEFAULT 0, revision INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(installation_id,id));
-    CREATE TABLE hours_activities (installation_id TEXT NOT NULL, id TEXT NOT NULL, category_id TEXT NOT NULL, mode TEXT NOT NULL, service_date TEXT NOT NULL, team_id TEXT, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', location TEXT NOT NULL DEFAULT '', impact_relevant INTEGER NOT NULL DEFAULT 1, source_meeting_id TEXT, source_snapshot TEXT, archived INTEGER NOT NULL DEFAULT 0, revision INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(installation_id,id), FOREIGN KEY(installation_id,category_id) REFERENCES hours_categories(installation_id,id), FOREIGN KEY(installation_id,team_id) REFERENCES hours_teams(installation_id,id), CHECK((mode='team' AND team_id IS NOT NULL) OR (mode!='team' AND team_id IS NULL)));
-    CREATE UNIQUE INDEX hours_canonical_activity ON hours_activities(installation_id,category_id,service_date,ifnull(team_id,'')) WHERE mode IN ('team','task');
-    INSERT INTO hours_categories(installation_id,id,name,mode,impact_default,created_at,updated_at) VALUES ('primary','team-support','Team Support','team',1,'2026-01-01','2026-01-01');
-  `);
+  raw.exec(coreTables);
+  raw.exec(readFileSync(new URL("tests/fixtures/core-hours-schema.sql", root), "utf8"));
+  return raw;
+}
+
+export function applyPluginMigrations(raw) {
+  // Each migration applies atomically, as Core's ledger applies one D1 batch per migration.
+  for (const { sql } of pluginMigrations()) { raw.exec("BEGIN"); try { raw.exec(sql); raw.exec("COMMIT"); } catch (error) { raw.exec("ROLLBACK"); throw error; } }
+  return raw;
+}
+
+export function d1(raw) {
   const prepare = (sql) => {
     let values = [];
     const statement = {
       sql,
       bind(...args) { values = args; return statement; },
-      allSync: () => ({ results: raw.prepare(sql).all(...values) }),
+      allSync: () => ({ results: raw.prepare(sql).all(...values), meta: { changes: 0 } }),
       runSync: () => ({ meta: { changes: Number(raw.prepare(sql).run(...values).changes) } }),
       async first() { return raw.prepare(sql).get(...values) ?? null; },
       async all() { return statement.allSync(); },
@@ -38,3 +68,12 @@ export function outreachDatabase() {
     },
   };
 }
+
+/** A migrated Outreach database for one synthetic installation. */
+export function outreachDatabase() {
+  const raw = applyPluginMigrations(coreBaselineDatabase());
+  raw.exec(installationRows);
+  return d1(raw);
+}
+
+export const migrationNames = () => readdirSync(new URL("migrations/", root)).filter((name) => name.endsWith(".sql")).sort();
