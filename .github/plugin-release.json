@@ -3,7 +3,7 @@
   "title": "LancerLogin Outreach plugin",
   "core": {
     "repository": "isriah/LancerLogin",
-    "tag": "v2.0.0-beta.16",
-    "commit": "4fcacb3329a78929cee60ef5ec1ceffb245ae30e"
+    "tag": "v2.1.0-beta.3",
+    "commit": "0cb20e516d1d7651de5bb780d287d0ac25dd3304"
   }
 }
