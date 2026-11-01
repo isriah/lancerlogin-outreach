@@ -2,9 +2,11 @@ import { addCalendarDays, instantToCivil } from "@lancerlogin/module-sdk";
 import type { D1Database } from "@lancerlogin/module-sdk/api";
 import { HttpError } from "@lancerlogin/module-sdk/api";
 import { submitOutreachEntry } from "./outreach-entries.ts";
+import { checkFirstTeam, firstCheckableNumber, type FirstTeamLookup } from "./outreach-first.ts";
 import { archivedTeamForMembers, closedActivityForMembers, otherServiceUnavailable, teamSupportUnavailable } from "./outreach-team-support.ts";
 import { requestOutreachCorrection } from "./outreach-review.ts";
 import { readPublicFormSettings, validatePublicMember } from "./outreach-public-settings.ts";
+import { outreachPrograms } from "../shared/outreach-programs.ts";
 
 type Row = Record<string, unknown>;
 type RouteResult = { status: number; body: unknown };
@@ -55,7 +57,19 @@ function requireSameOrigin(request: Request, allowedOrigin: string) {
   if (!origin || origin !== allowedOrigin) throw new HttpError(403, "Use the published LancerLogin submission page");
 }
 
-export async function outreachPublicRoute(db: D1Database, request: Request, allowedOrigin: string, input?: unknown, now = Date.now()): Promise<RouteResult> {
+/**
+ * The public form's team-number check: `?program=&number=` with a FIRST program and a 1- to 6-digit number. It answers
+ * only FIRST's team name, "not-found" or "unavailable", never FIRST's other team details or why it is unavailable.
+ */
+async function teamLookup(url: URL, first: FirstTeamLookup | undefined): Promise<RouteResult> {
+  url.searchParams.forEach((_, key) => { if (!["program", "number"].includes(key) || url.searchParams.getAll(key).length !== 1) throw new HttpError(400, "Invalid team lookup"); });
+  const program = url.searchParams.get("program"); const teamNumber = (url.searchParams.get("number") ?? "").trim();
+  if (!outreachPrograms.includes(program as typeof outreachPrograms[number]) || !firstCheckableNumber.test(teamNumber)) throw new HttpError(400, "Invalid team lookup");
+  return { status: 200, body: await checkFirstTeam(first, program, teamNumber) };
+}
+
+/** Public form routes. `first` is Core's FIRST connection (`services.first`), which checks team numbers members enter. */
+export async function outreachPublicRoute(db: D1Database, request: Request, allowedOrigin: string, input?: unknown, now = Date.now(), first?: FirstTeamLookup): Promise<RouteResult> {
   if (!Number.isSafeInteger(now) || !Number.isFinite(new Date(now).getTime())) throw new HttpError(400, "Invalid current instant");
   const url = new URL(request.url); const kind = url.pathname.slice("/public/hours/".length);
   if (request.method === "POST") {
@@ -65,7 +79,7 @@ export async function outreachPublicRoute(db: D1Database, request: Request, allo
   if (kind === "member-validation" && request.method === "POST") return validatePublicMember(db, input, now);
   if (kind === "entries" && request.method === "POST") {
     try {
-      const result = await submitOutreachEntry(db, { channel: "public" }, input, now);
+      const result = await submitOutreachEntry(db, { channel: "public", first }, input, now);
       return { status: result.status, body: publicReceipt(result.body) };
     } catch (error) {
       if (error instanceof HttpError && [400, 409].includes(error.status)) return publicInputError(db, error, false);
@@ -80,6 +94,7 @@ export async function outreachPublicRoute(db: D1Database, request: Request, allo
     }
   }
   if (request.method !== "GET") throw new HttpError(405, "Unsupported public Outreach operation");
+  if (kind === "team-lookup") return teamLookup(url, first);
   if (kind === "context") {
     let filtered = false; url.searchParams.forEach(() => { filtered = true; });
     if (filtered) throw new HttpError(400, "Invalid Outreach context filter");

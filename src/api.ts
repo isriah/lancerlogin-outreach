@@ -61,7 +61,7 @@ const api = defineApiModule({
     },
     async "/public/hours"(context) {
       if (!context.url.pathname.startsWith("/public/hours/")) return undefined;
-      const routed = await outreachPublicRoute(context.db, context.request, context.dashboardOrigin ?? context.url.origin, await context.body());
+      const routed = await outreachPublicRoute(context.db, context.request, context.dashboardOrigin ?? context.url.origin, await context.body(), undefined, context.services.first);
       return context.respond(routed.body, routed.status);
     },
   },

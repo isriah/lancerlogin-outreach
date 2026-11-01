@@ -101,6 +101,8 @@
 :where([data-module="hour-tracking"]) .public-outreach-form input:not([type="radio"]):not([type="checkbox"]),:where([data-module="hour-tracking"]) .public-outreach-form select,:where([data-module="hour-tracking"]) .public-outreach-form textarea { width: 100%; min-width: 0; max-width: 100%; }
 :where([data-module="hour-tracking"]) .public-outreach-form textarea { min-height: calc(var(--control-min-block-size) * 1.6); resize: vertical; }
 :where([data-module="hour-tracking"]) .public-outreach-form .field-help { margin: 0; color: var(--ui-text-muted); font-size: var(--text-small); font-weight: 400; }
+:where([data-module="hour-tracking"]) .public-outreach-form .field-help.public-outreach-warning { color: var(--ui-warning); font-weight: 650; }
+:where([data-module="hour-tracking"]) .public-outreach-form input[readonly] { background: var(--ui-surface-subtle); cursor: default; }
 :where([data-module="hour-tracking"]) .public-outreach-receipt { padding: var(--space-6); }
 :where([data-module="hour-tracking"]) .public-outreach-receipt code { overflow-wrap: anywhere; }
 :where([data-module="hour-tracking"]) .public-outreach-receipt > .ui-button--primary { justify-self: start; }
