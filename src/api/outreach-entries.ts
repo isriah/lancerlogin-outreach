@@ -3,13 +3,15 @@ import type { D1Database } from "@lancerlogin/module-sdk/api";
 import { HttpError } from "@lancerlogin/module-sdk/api";
 import { outreachPrograms } from "../shared/outreach-programs.ts";
 import { outreachDayStartsAt } from "../shared/outreach-reporting.ts";
-import { archivedTeamForMembers, closedActivityForMembers, ensureOtherServiceActivity, ensureSupportedTeam, ensureTeamSupportActivity, findOtherServiceActivity, findTeamSupportActivity } from "./outreach-team-support.ts";
+import { checkFirstTeam, type FirstTeamLookup } from "./outreach-first.ts";
+import { archivedTeamForMembers, closedActivityForMembers, ensureOtherServiceActivity, ensureSupportedTeam, ensureTeamSupportActivity, findOtherServiceActivity, findSupportedTeams, findTeamSupportActivity } from "./outreach-team-support.ts";
 
 type Row = Record<string, unknown>;
 type RouteResult = { status: number; body: unknown };
 export type OutreachEntryContext =
   | { channel: "staff"; actor: string }
-  | { channel: "public" }
+  // `first` is Core's FIRST connection, used to name a team a member adds. Without it, the typed name is kept.
+  | { channel: "public"; first?: FirstTeamLookup }
   | { channel: "discord"; discordUserId: string };
 
 const installationId = "primary";
@@ -172,10 +174,21 @@ async function existingSelfLoggedActivity(db: D1Database, kind: Exclude<EntryKin
 }
 
 /**
+ * A team a member adds, named as FIRST names it when FIRST has that number in that program. FIRST is asked only when the
+ * team would be created, never for a team already on the supported teams list; when FIRST is unavailable or has no such
+ * team, the member's typed name is kept, so the check never blocks a submission.
+ */
+async function namedByFirst(db: D1Database, first: FirstTeamLookup | undefined, team: { number: string; program: string; name: string }) {
+  if (!first || (await findSupportedTeams(db, team)).teams.length) return team;
+  const check = await checkFirstTeam(first, team.program, team.number);
+  return check.status === "found" ? { ...team, name: check.name } : team;
+}
+
+/**
  * Find or create the supported team and activity for a self-logged entry: the Team Support activity for that team and
  * date, or the Other Service activity titled with the description on that date. Every step is idempotent, so retries are safe.
  */
-async function selfLoggedActivity(db: D1Database, kind: Exclude<EntryKind, "activity">, input: ReturnType<typeof selfLoggedInput>, serviceDate: string, now: number) {
+async function selfLoggedActivity(db: D1Database, kind: Exclude<EntryKind, "activity">, input: ReturnType<typeof selfLoggedInput>, serviceDate: string, now: number, first?: FirstTeamLookup) {
   const caller = { channel: "public" } as const; const team = input.team; let activityId: string;
   if (kind === "other") activityId = (await ensureOtherServiceActivity(db, caller, { serviceDate, title: input.notes }, now)).activityId;
   else {
@@ -185,7 +198,7 @@ async function selfLoggedActivity(db: D1Database, kind: Exclude<EntryKind, "acti
       if (!chosen) throw new HttpError(400, "Choose a team from the supported teams list or enter a new one");
       if (Number(chosen.archived)) throw new HttpError(409, archivedTeamForMembers);
       teamId = String(chosen.id);
-    } else teamId = (await ensureSupportedTeam(db, caller, team, now)).team.id;
+    } else teamId = (await ensureSupportedTeam(db, caller, await namedByFirst(db, first, team!), now)).team.id;
     activityId = (await ensureTeamSupportActivity(db, caller, { teamId, serviceDate }, now)).activityId;
   }
   const activity = await db.prepare("SELECT * FROM hours_activities WHERE installation_id=? AND id=?").bind(installationId, activityId).first<Row>();
@@ -235,7 +248,7 @@ export async function submitOutreachEntry(db: D1Database, contextValue: Outreach
   // A self-logged entry outside the reporting window needs a reopening that already covers it, checked before its team or
   // activity is created, so a refused submission never adds catalog records.
   if (selfLogged && !inWindow && !await reopenedFor(await existingSelfLoggedActivity(db, kind as Exclude<EntryKind, "activity">, serviceDate, selfLogged))) throw outsideWindow();
-  const activity = selfLogged ? await selfLoggedActivity(db, kind as Exclude<EntryKind, "activity">, selfLogged, serviceDate, now) : await resolveActivity(db, inputValue, serviceDate);
+  const activity = selfLogged ? await selfLoggedActivity(db, kind as Exclude<EntryKind, "activity">, selfLogged, serviceDate, now, contextValue.channel === "public" ? contextValue.first : undefined) : await resolveActivity(db, inputValue, serviceDate);
   const reopened = await reopenedFor(String(activity.id));
   if (contextValue.channel !== "staff" && !inWindow && !reopened) throw outsideWindow();
   const timing = selfLogged ? "duration" : "clock";

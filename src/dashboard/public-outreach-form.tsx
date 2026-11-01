@@ -19,6 +19,10 @@ const maximumMinutes = 24 * 60; const descriptionLength = 150; const teamNoteLen
 const teamLabel = (team: Pick<Team, "number" | "name" | "program">) => `${team.number ? `${team.number} ` : ""}${team.name} (${team.program})`;
 type CorrectionReceipt = { reference: string; status: string; createdAt: string };
 type Validation = { status: "checking" | "valid" | "invalid" | "unavailable"; text: string };
+/** What FIRST says about the team number and program a member enters for a new team, through Core's FIRST connection. */
+type TeamCheck = { key: string; status: "checking" | "found" | "not-found" | "unavailable"; name?: string };
+// Kept in step with firstCheckableNumber in outreach-first.ts: FIRST team numbers are 1 to 6 digits.
+const firstCheckableNumber = /^\d{1,6}$/; const teamCheckDelayMs = 400;
 class PublicFormError extends Error {
   constructor(message: string, readonly retryExact: boolean) { super(message); }
 }
@@ -49,8 +53,9 @@ export function PublicOutreachForm() {
   const [mode, setMode] = useState<"entry" | "correction">("entry"); const [correctionActivities, setCorrectionActivities] = useState<Activity[]>([]); const [correctionCursor, setCorrectionCursor] = useState<string | null>(null);
   const [correctionMessage, setCorrectionMessage] = useState(""); const [correctionPending, setCorrectionPending] = useState<Record<string, unknown>>(); const [correctionReceipt, setCorrectionReceipt] = useState<CorrectionReceipt>();
   const [logging, setLogging] = useState<Logging>("activity"); const [teams, setTeams] = useState<Team[]>(); const [teamId, setTeamId] = useState("");
-  const [teamNumber, setTeamNumber] = useState(""); const [teamProgram, setTeamProgram] = useState(""); const [teamName, setTeamName] = useState("");
+  const [teamNumber, setTeamNumber] = useState(""); const [teamProgram, setTeamProgram] = useState(""); const [typedTeamName, setTypedTeamName] = useState("");
   const [serviceDate, setServiceDate] = useState(""); const [durationMinutes, setDurationMinutes] = useState(""); const [loggedLabel, setLoggedLabel] = useState("");
+  const [teamCheck, setTeamCheck] = useState<TeamCheck>();
   const activity = activities.find(item => item.id === activityId); const entryDate = activity?.serviceDate ?? "";
   const selfLogged = logging !== "activity";
 
@@ -114,18 +119,37 @@ export function PublicOutreachForm() {
   const durationProblem = durationMinutes && !(minutesValue >= 1 && minutesValue <= maximumMinutes) ? `Enter whole minutes from 1 to ${maximumMinutes}.` : "";
   const dateProblem = serviceDate && context && (serviceDate > context.today || serviceDate < context.earliestServiceDate) ? `Choose a date from ${context.earliestServiceDate} to ${context.today}.` : "";
   const addingTeam = logging === "team" && teamId === newTeam;
+  const teamCheckKey = addingTeam && teamProgram && firstCheckableNumber.test(teamNumber.trim()) ? `${teamProgram}:${teamNumber.trim()}` : "";
+  const currentCheck = teamCheck && teamCheck.key === teamCheckKey ? teamCheck : undefined;
+  const firstName = currentCheck?.status === "found" ? currentCheck.name : undefined;
+  // A debounced check of a new team's number and program. FIRST's name fills in and locks the team name; a member's
+  // typed name comes back when the number or program changes. "Not found" only warns, and "unavailable" stays quiet.
+  useEffect(() => {
+    if (!teamCheckKey) return;
+    const controller = new AbortController(); const [program, number] = [teamCheckKey.slice(0, teamCheckKey.indexOf(":")), teamCheckKey.slice(teamCheckKey.indexOf(":") + 1)];
+    const timer = window.setTimeout(() => {
+      setTeamCheck({ key: teamCheckKey, status: "checking" });
+      void publicApi<{ status: "found" | "not-found" | "unavailable"; name?: string }>(`team-lookup?program=${encodeURIComponent(program)}&number=${encodeURIComponent(number)}`, { signal: controller.signal })
+        .then(result => { if (!controller.signal.aborted) setTeamCheck(result.status === "found" && result.name ? { key: teamCheckKey, status: "found", name: result.name } : { key: teamCheckKey, status: result.status === "not-found" ? "not-found" : "unavailable" }); })
+        .catch(() => { if (!controller.signal.aborted) setTeamCheck({ key: teamCheckKey, status: "unavailable" }); });
+    }, teamCheckDelayMs);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [teamCheckKey]);
+  const shownTeamName = firstName ?? typedTeamName;
+  const teamCheckHelp = currentCheck?.status === "checking" ? "Checking the team number with FIRST..." : firstName !== undefined ? "Name from FIRST. Change the number or program to edit it."
+    : currentCheck?.status === "not-found" ? `FIRST has no ${teamProgram} team ${teamNumber.trim()}. Check the number, or enter the team name to add it anyway.` : "";
   const body = useMemo(() => {
     if (!context) return undefined;
     if (logging === "activity") return { memberExternalId, activityId, serviceDate: entryDate, startLocal, endLocal, ...(startOccurrence ? { startOccurrence } : {}), ...(endOccurrence ? { endOccurrence } : {}), taskNotes, expectedTimeZone: context.timeZone };
     const common = { kind: logging, memberExternalId, serviceDate, durationMinutes: minutesValue, expectedTimeZone: context.timeZone };
     if (logging === "other") return { ...common, taskNotes };
-    return { ...common, ...(addingTeam ? { team: { number: teamNumber, program: teamProgram, name: teamName } } : { teamId }), ...(taskNotes.trim() ? { taskNotes } : {}) };
-  }, [logging, memberExternalId, activityId, entryDate, startLocal, endLocal, startOccurrence, endOccurrence, taskNotes, context, serviceDate, minutesValue, addingTeam, teamNumber, teamProgram, teamName, teamId]);
+    return { ...common, ...(addingTeam ? { team: { number: teamNumber, program: teamProgram, name: shownTeamName } } : { teamId }), ...(taskNotes.trim() ? { taskNotes } : {}) };
+  }, [logging, memberExternalId, activityId, entryDate, startLocal, endLocal, startOccurrence, endOccurrence, taskNotes, context, serviceDate, minutesValue, addingTeam, teamNumber, teamProgram, shownTeamName, teamId]);
   const selfLoggedReady = Boolean(serviceDate) && !dateProblem && Boolean(durationMinutes) && !durationProblem && (logging === "other" ? Boolean(taskNotes.trim())
-    : addingTeam ? Boolean(teamNumber.trim() && teamProgram && teamName.trim()) : Boolean(teamId));
+    : addingTeam ? Boolean(teamNumber.trim() && teamProgram && shownTeamName.trim()) : Boolean(teamId));
   const ready = logging === "activity" ? Boolean(activityId && entryDate && startMinutes !== undefined && endMinutes !== undefined && !timeOrderProblem) : selfLoggedReady;
   const chosenTeam = teams?.find(item => item.id === teamId);
-  const loggedText = () => logging === "activity" ? activity?.title ?? "" : logging === "other" ? taskNotes.trim() : addingTeam ? teamLabel({ number: teamNumber.trim(), name: teamName.trim(), program: teamProgram }) : chosenTeam ? teamLabel(chosenTeam) : "";
+  const loggedText = () => logging === "activity" ? activity?.title ?? "" : logging === "other" ? taskNotes.trim() : addingTeam ? teamLabel({ number: teamNumber.trim(), name: shownTeamName.trim(), program: teamProgram }) : chosenTeam ? teamLabel(chosenTeam) : "";
 
   async function submit(event?: React.FormEvent, exact?: Record<string, unknown>) {
     event?.preventDefault(); if ((!body && !exact) || (!exact && (pending || !ready))) return;
@@ -157,7 +181,7 @@ export function PublicOutreachForm() {
     try { const page = await publicApi<Page<Activity>>(`correction-activities?limit=100&after=${encodeURIComponent(correctionCursor)}`); setCorrectionActivities(previous => [...previous, ...page.items]); setCorrectionCursor(page.nextCursor); }
     catch (error) { setNotice((error as Error).message); } finally { setBusy(false); }
   }
-  function clearChoiceFields() { setTaskNotes(""); setActivityId(""); setStartLocal(""); setEndLocal(""); setStartOccurrence(undefined); setEndOccurrence(undefined); setTeamId(""); setTeamNumber(""); setTeamProgram(""); setTeamName(""); setServiceDate(""); setDurationMinutes(""); }
+  function clearChoiceFields() { setTaskNotes(""); setActivityId(""); setStartLocal(""); setEndLocal(""); setStartOccurrence(undefined); setEndOccurrence(undefined); setTeamId(""); setTeamNumber(""); setTeamProgram(""); setTypedTeamName(""); setTeamCheck(undefined); setServiceDate(""); setDurationMinutes(""); }
   function reset() { setReceipt(undefined); clearChoiceFields(); setPending(undefined); setNotice(""); setMode("entry"); clearValidation(); }
   function chooseLogging(next: Logging) { if (next === logging) return; setLogging(next); clearChoiceFields(); setPending(undefined); setNotice(""); }
   function preventImplicitSubmission(event: React.KeyboardEvent<HTMLFormElement>) {
@@ -196,9 +220,9 @@ export function PublicOutreachForm() {
           <label>Team<select required className="ui-native-select" value={teamId} disabled={!teams} onChange={event => setTeamId(event.target.value)}><option value="">{teams ? "Choose a supported team" : "Loading supported teams..."}</option>{teams?.map(item => <option key={item.id} value={item.id}>{teamLabel(item)}</option>)}<option value={newTeam}>My team is not listed - add it</option></select></label>
         </div>
         {addingTeam && <div className="public-outreach-row public-outreach-row--team">
-          <label>Team number<input required maxLength={32} autoComplete="off" value={teamNumber} onChange={event => setTeamNumber(event.target.value)} /></label>
+          <label>Team number<input required maxLength={32} autoComplete="off" value={teamNumber} aria-describedby={teamCheckHelp ? "public-team-check-help" : undefined} onChange={event => setTeamNumber(event.target.value)} /></label>
           <label>Program<select required className="ui-native-select" value={teamProgram} onChange={event => setTeamProgram(event.target.value)}><option value="">Choose</option>{outreachPrograms.map(program => <option key={program} value={program}>{program}</option>)}</select></label>
-          <label>Team name<input required maxLength={150} autoComplete="off" value={teamName} onChange={event => setTeamName(event.target.value)} /></label>
+          <label>Team name<input required maxLength={150} autoComplete="off" value={shownTeamName} readOnly={firstName !== undefined} aria-describedby={teamCheckHelp ? "public-team-check-help" : undefined} onChange={event => setTypedTeamName(event.target.value)} />{teamCheckHelp && <span id="public-team-check-help" className={`field-help${currentCheck?.status === "not-found" ? " public-outreach-warning" : ""}`} role="status">{teamCheckHelp}</span>}</label>
         </div>}
         {dateAndMinutes()}
         <label>Note (optional)<input maxLength={teamNoteLength} autoComplete="off" value={taskNotes} onChange={event => setTaskNotes(event.target.value)} /></label>

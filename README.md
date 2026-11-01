@@ -27,6 +27,7 @@ Outreach is LancerLogin's first official plugin. Every installation build includ
 | --- | --- | --- |
 | 1.0.x | `>=2.0.0-beta.11 <3.0.0` (Modular 2.0.0-beta.11 and later 2.x releases) | 1 |
 | 1.1.x | `>=2.0.0-beta.15 <3.0.0` (Modular 2.0.0-beta.15, the first Core with module SDK 1.1.0, and later 2.x releases) | 1 |
+| Next release | The first Core with module SDK 1.2.0 (Core's shared FIRST connection, `services.first`) and later 2.x releases | 1 |
 
 The supported Core range is the `lancerlogin.core` field in `package.json`. Composition refuses this plugin for a Core outside that range, before an installation build or web update starts. React and `@lancerlogin/module-sdk` are peer dependencies provided by Core; the `@lancerlogin/module-sdk` range also refuses a Core whose SDK is too old.
 
@@ -34,10 +35,22 @@ The supported Core range is the `lancerlogin.core` field in `package.json`. Comp
 
 On the public form, a member chooses what they are logging: a **Scheduled activity** Staff created (a dated activity), **Team support** or **Other service**. Team support and Other service take a service date inside the reporting window and a duration in whole minutes (1 to 1440), with no start or end time, and count immediately; Staff can edit or void them like any entry.
 
-- **Team support** names a team on the supported teams list, or a new team by number, program and name. A new team is matched to an existing one by number and program, ignoring letter case and surrounding spaces, and is otherwise added to the list flagged as added by a member. **Settings > Outreach > Supported teams** shows the flag, filters to member-added teams and lets Staff mark one reviewed. The entry joins the Team Support activity for that team and date, which is created when there is none.
+- **Team support** names a team on the supported teams list, or a new team by number, program and name. A new team is matched to an existing one by number and program, ignoring letter case and surrounding spaces, and is otherwise added to the list flagged as added by a member. See [Checking team numbers with FIRST](#checking-team-numbers-with-first). **Settings > Outreach > Supported teams** shows the flag, filters to member-added teams and lets Staff mark one reviewed. The entry joins the Team Support activity for that team and date, which is created when there is none.
 - **Other service** takes a short description (up to 150 characters), such as "STEM tutoring". The entry joins the Other Service activity with that title on that date, created when there is none, and keeps the description in its notes.
 
 Duration-only entries store their interval anchored at the start of the service day so totals, receipts and history are unchanged, and they never count as overlapping other participation. Reports show no start or end time for them.
+
+## Checking team numbers with FIRST
+
+When a member adds a new team, the public form checks its number and program with FIRST through Core's shared FIRST connection (`services.first`, module SDK 1.2.0), which an Admin sets up in **Settings > Integrations > FIRST**. Outreach never contacts FIRST itself and never sees the credentials.
+
+- The form checks a 1- to 6-digit number about half a second after the member stops typing, once a program is chosen, through `GET /public/hours/team-lookup?program=&number=`. That route answers only `{ "status": "found", "name": "..." }`, `{ "status": "not-found" }` or `{ "status": "unavailable" }`, never FIRST's other team details or why it is unavailable.
+- **Found:** FIRST's name fills in the team name, which is locked until the number or program changes.
+- **Not found:** the form warns that FIRST has no such team, and the member can still submit with a typed name.
+- **Unavailable** (no credential for that program, FIRST rate limits or errors, or a number that is not 1 to 6 digits): the form says nothing and the member types the name.
+- FLL Challenge and Explore are checked too. Core reports them unavailable until it turns on FIRST's public team search.
+- On submission, Outreach checks again on the server before it adds the team, and stores FIRST's name instead of the typed one when FIRST finds the team. It asks only for a team that is not already on the supported teams list, and never refuses a submission because FIRST is unavailable or has no such team. Retrying an exact submission returns the saved receipt without asking again.
+- Core caches answers and allows each public visitor 10 uncached lookups a minute, so a rate-limited check reads as unavailable.
 
 ## Team support for other modules
 
