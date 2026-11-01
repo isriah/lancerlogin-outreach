@@ -175,10 +175,9 @@ export function PublicOutreachForm() {
     <div className="module-actions"><button className="ui-button ui-button--primary" disabled={busy || Boolean(correctionPending) || validation?.status === "invalid" || !memberExternalId.trim() || !activityId || !correctionMessage.trim()}>{busy ? "Confirming..." : "Send correction request"}</button>{correctionPending && <button className="ui-button" type="button" disabled={busy} onClick={() => void submitCorrection(undefined, correctionPending)}>Retry exact request</button>}<button className="ui-button" type="button" disabled={busy} onClick={() => { reset(); }}>Back to participation form</button></div>
   </form></main>;
 
-  const dateAndMinutes = (extra?: React.ReactNode) => context && <div className={`public-outreach-row${extra ? " public-outreach-row--duration" : ""}`}>
+  const dateAndMinutes = () => context && <div className="public-outreach-row">
     <label>Service date<input type="date" required min={context.earliestServiceDate} max={context.today} value={serviceDate} aria-invalid={Boolean(dateProblem) || undefined} aria-describedby={dateProblem ? "public-service-date-help" : undefined} onChange={event => setServiceDate(event.target.value)} />{dateProblem && <span id="public-service-date-help" className="field-help" role="alert">{dateProblem}</span>}</label>
     <label>Minutes<input type="number" required inputMode="numeric" min={1} max={maximumMinutes} step={1} value={durationMinutes} aria-invalid={Boolean(durationProblem) || undefined} aria-describedby={durationProblem ? "public-duration-help" : undefined} onChange={event => setDurationMinutes(event.target.value)} />{durationProblem && <span id="public-duration-help" className="field-help" role="alert">{durationProblem}</span>}</label>
-    {extra}
   </div>;
   const submitLabel = logging === "team" ? "Record team support" : logging === "other" ? "Record other service" : "Record completed participation";
 
@@ -201,11 +200,11 @@ export function PublicOutreachForm() {
           <label>Program<select required className="ui-native-select" value={teamProgram} onChange={event => setTeamProgram(event.target.value)}><option value="">Choose</option>{outreachPrograms.map(program => <option key={program} value={program}>{program}</option>)}</select></label>
           <label>Team name<input required maxLength={150} autoComplete="off" value={teamName} onChange={event => setTeamName(event.target.value)} /></label>
         </div>}
-        {dateAndMinutes(<label>Note (optional)<input maxLength={teamNoteLength} autoComplete="off" value={taskNotes} onChange={event => setTaskNotes(event.target.value)} /></label>)}
+        {dateAndMinutes()}
+        <label>Note (optional)<input maxLength={teamNoteLength} autoComplete="off" value={taskNotes} onChange={event => setTaskNotes(event.target.value)} /></label>
       </> : <>
-        <div className="public-outreach-row">{memberField}
-          <label>Description<input required maxLength={descriptionLength} autoComplete="off" placeholder="For example, STEM tutoring" value={taskNotes} onChange={event => setTaskNotes(event.target.value)} /></label>
-        </div>
+        {memberField}
+        <label>Description<input required maxLength={descriptionLength} autoComplete="off" placeholder="For example, STEM tutoring" value={taskNotes} onChange={event => setTaskNotes(event.target.value)} /></label>
         {dateAndMinutes()}
       </>}
       <div className="module-actions public-outreach-actions"><button className="ui-button ui-button--primary" disabled={busy || Boolean(pending) || validation?.status === "invalid" || !memberExternalId.trim() || !ready}>{busy ? "Confirming..." : submitLabel}</button>{pending && <button className="ui-button" type="button" disabled={busy} onClick={() => void submit(undefined, pending)}>Retry exact submission</button>}{selfLogged && <p className="field-help">Counts right away.{logging === "team" ? " A team you add joins the supported teams list for Staff to review." : ""}</p>}</div>

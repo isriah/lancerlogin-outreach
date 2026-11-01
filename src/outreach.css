@@ -91,7 +91,6 @@
 :where([data-module="hour-tracking"]) .public-outreach-form .outreach-time-grid { gap: var(--space-3); }
 :where([data-module="hour-tracking"]) .public-outreach-row { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); align-items: start; gap: var(--space-3); }
 :where([data-module="hour-tracking"]) .public-outreach-row--team { grid-template-columns: minmax(0,8rem) minmax(0,9rem) minmax(0,1fr); }
-:where([data-module="hour-tracking"]) .public-outreach-row--duration { grid-template-columns: minmax(0,11rem) minmax(0,8rem) minmax(0,1fr); }
 :where([data-module="hour-tracking"]) .public-outreach-actions { align-items: center; }
 :where([data-module="hour-tracking"]) .public-outreach-actions .field-help { flex: 1 1 16rem; }
 :where([data-module="hour-tracking"]) .public-outreach-choice { margin: 0; }
@@ -115,8 +114,8 @@
   :where([data-module="hour-tracking"]) .outreach-activity-visibility > summary { min-width: 6.5rem; }
   :where([data-module="hour-tracking"]) .public-outreach-page { width: min(100% - 1rem,46rem); margin-block: 0 var(--space-3); }
   :where([data-module="hour-tracking"]) .public-outreach-intro,:where([data-module="hour-tracking"]) .public-outreach-row { grid-template-columns: minmax(0,1fr); }
-  :where([data-module="hour-tracking"]) .public-outreach-row--team,:where([data-module="hour-tracking"]) .public-outreach-row--duration { grid-template-columns: repeat(2,minmax(0,1fr)); }
-  :where([data-module="hour-tracking"]) .public-outreach-row--team > :last-child,:where([data-module="hour-tracking"]) .public-outreach-row--duration > :last-child { grid-column: 1 / -1; }
+  :where([data-module="hour-tracking"]) .public-outreach-row--team { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  :where([data-module="hour-tracking"]) .public-outreach-row--team > :last-child { grid-column: 1 / -1; }
   :where([data-module="hour-tracking"]) .public-outreach-intro > .ui-button { justify-self: start; }
   :where([data-module="hour-tracking"]) .public-outreach-choice label { padding-inline: var(--space-1); white-space: normal; text-align: center; line-height: 1.15; }
   :where([data-module="hour-tracking"]) .public-outreach-form,:where([data-module="hour-tracking"]) .public-outreach-receipt { padding: var(--space-4); }
