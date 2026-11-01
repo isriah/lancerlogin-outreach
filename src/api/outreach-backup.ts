@@ -1,4 +1,5 @@
-// Outreach's portable backup section. Plugin sections use module backup version 3. Backups made while Outreach was
+// Outreach's portable backup section. Plugin sections use module backup version 4; version 3 sections, from before
+// supported teams recorded member additions and entries recorded their timing, gain those columns' defaults. Backups made while Outreach was
 // first-party (entire-installation schema 25 through 43) carried these tables in Core's section as module backup version 2;
 // Core lifts those rows out and hands them to `normalize` with `source.coreSection` set, and this adapter applies exactly the
 // historical shims and checks Core applied, keyed by the backup's schema version.
@@ -12,11 +13,11 @@ type Tables = Record<string, Row[]>;
 export const outreachBackupTables = {
   hours_categories: ["installation_id", "id", "name", "mode", "impact_default", "archived", "revision", "created_at", "updated_at"],
   hours_labels: ["installation_id", "id", "name", "archived", "revision", "created_by", "created_at", "updated_at"],
-  hours_teams: ["installation_id", "id", "number", "name", "program", "historical_descriptors", "archived", "revision", "created_at", "updated_at"],
+  hours_teams: ["installation_id", "id", "number", "name", "program", "historical_descriptors", "archived", "revision", "created_at", "updated_at", "added_by_member"],
   hours_activities: ["installation_id", "id", "category_id", "mode", "service_date", "team_id", "title", "description", "location", "impact_relevant", "source_meeting_id", "source_snapshot", "archived", "revision", "created_at", "updated_at", "event_start_local", "event_end_local", "event_start_occurrence", "event_end_occurrence"],
   hours_activity_labels: ["installation_id", "activity_id", "label_id", "created_by", "created_at"],
   hours_entry_settings: ["installation_id", "reporting_days", "reopen_hours", "revision"],
-  hours_entries: ["installation_id", "id", "member_id", "activity_id", "service_date", "time_zone", "start_local", "end_local", "start_occurrence", "end_occurrence", "start_ms", "end_ms", "start_offset_seconds", "end_offset_seconds", "duration_minutes", "task_notes", "status", "channel", "attribution", "actor_user_id", "revision", "created_at", "updated_at"],
+  hours_entries: ["installation_id", "id", "member_id", "activity_id", "service_date", "time_zone", "start_local", "end_local", "start_occurrence", "end_occurrence", "start_ms", "end_ms", "start_offset_seconds", "end_offset_seconds", "duration_minutes", "task_notes", "status", "channel", "attribution", "actor_user_id", "revision", "created_at", "updated_at", "timing"],
   hours_entry_revisions: ["installation_id", "entry_id", "revision", "member_id", "activity_id", "action", "reason", "actor_user_id", "snapshot_json", "created_at"],
   hours_submission_keys: ["installation_id", "channel", "key_hash", "fingerprint", "entry_id", "receipt_json", "created_at"],
   hours_reopen_windows: ["installation_id", "id", "activity_id", "starts_ms", "expires_ms", "reason", "revoked", "revision", "actor_user_id", "created_at", "updated_at"],
@@ -45,6 +46,8 @@ function coreSectionColumns(table: Table, schema: number): readonly string[] {
   if (table === "hours_publication_operations" && schema < 36) return columns.slice(0, schema < 29 ? -2 : -1);
   if (table === "hours_correction_requests" && schema < 33) return columns.slice(0, -1);
   if (table === "hours_activities" && schema < 29) return columns.slice(0, -4);
+  // Added in plugin backup version 4, after Outreach left Core.
+  if (table === "hours_teams" || table === "hours_entries") return columns.slice(0, -1);
   return columns;
 }
 
@@ -83,12 +86,20 @@ function normalizeCoreSection(input: ModuleBackupTables, source: ModuleBackupSou
     tables.hours_labels = tables.hours_categories!.map((row) => ({ installation_id: row.installation_id, id: row.id, name: row.name, archived: row.archived, revision: row.revision, created_by: null, created_at: row.created_at, updated_at: row.updated_at }));
     tables.hours_activity_labels = tables.hours_activities!.map((row) => ({ installation_id: row.installation_id, activity_id: row.id, label_id: row.category_id, created_by: null, created_at: row.created_at }));
   }
-  return tables;
+  return version3Defaults(tables);
+}
+
+/** Version 3 rows predate member-added teams and duration-only entries: every team was Staff-added, every entry had clock times. */
+function version3Defaults(tables: ModuleBackupTables): Tables {
+  const rows = (table: Table) => Array.isArray(tables[table]) ? tables[table] as Row[] : [];
+  return { ...tables, hours_teams: rows("hours_teams").map((row) => ({ ...row, added_by_member: 0 })), hours_entries: rows("hours_entries").map((row) => ({ ...row, timing: "clock" })) } as Tables;
 }
 
 function validate(tables: ModuleBackupTables) {
   const settings = tables.hours_public_form_settings ?? [];
   if (settings.length > 1 || settings.some((row) => !["off", "validity", "name"].includes(String(row.member_validation)) || !Number.isSafeInteger(row.revision) || Number(row.revision) < 0 || Number(row.revision) >= Number.MAX_SAFE_INTEGER || !validTimestamp(row.updated_at))) throw new HttpError(400, "Backup public form privacy settings are invalid");
+  if ((tables.hours_teams ?? []).some((row) => row.added_by_member !== 0 && row.added_by_member !== 1)) throw new HttpError(400, "Backup supported team sources are invalid");
+  if ((tables.hours_entries ?? []).some((row) => row.timing !== "clock" && row.timing !== "duration")) throw new HttpError(400, "Backup participation timing is invalid");
   const activities = tables.hours_activities ?? [];
   if ((tables.hours_correction_requests ?? []).some((row) => row.activity_id !== null && !activities.some((activity) => activity.id === row.activity_id && activity.installation_id === row.installation_id))) throw new HttpError(400, "Backup correction activity reference is invalid");
   try {
@@ -102,12 +113,13 @@ function validate(tables: ModuleBackupTables) {
 const pending = (row: Readonly<Row>) => ["pending", "processing"].includes(String(row.status));
 
 export const outreachBackupAdapter: ModuleBackupAdapter = {
-  version: 3,
+  version: 4,
   tables: outreachBackupTables,
   normalize(tables, fromVersion, source) {
     // Version 2 rows exist only in Core's section of historical backups; plugin sections start at version 3.
-    if (!source.coreSection || fromVersion !== 2) throw new HttpError(400, `Backup data for Outreach Participation uses module backup version ${fromVersion}, which this plugin cannot upgrade`);
-    return normalizeCoreSection(tables, source);
+    if (source.coreSection && fromVersion === 2) return normalizeCoreSection(tables, source);
+    if (!source.coreSection && fromVersion === 3) return version3Defaults(tables);
+    throw new HttpError(400, `Backup data for Outreach Participation uses module backup version ${fromVersion}, which this plugin cannot upgrade`);
   },
   validate,
   /** Provider work never resumes from a backup: pending and leased publication operations wait for an explicit retry. */

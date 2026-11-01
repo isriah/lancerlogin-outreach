@@ -3,7 +3,12 @@ export type OutreachParticipationEntry = {
   memberName: string; externalId: string; serviceDate: string; startLocal: string; endLocal: string;
   startOccurrence?: "earlier" | "later" | null; endOccurrence?: "earlier" | "later" | null;
   durationMinutes: number; taskNotes: string; attribution: string; staffReason?: string | null;
+  /** "duration" for entries members logged as minutes only; their stored start and end are not times they were present. */
+  timing?: "clock" | "duration";
 };
+
+/** An entry's time for display: its start and end, or that it records a duration only. */
+export const outreachEntryTime = (entry: { timing?: "clock" | "duration" | null; startLocal: string | null; endLocal: string | null }) => entry.timing === "duration" ? "Duration only" : `${entry.startLocal} to ${entry.endLocal}`;
 
 export function groupOutreachParticipation<T extends OutreachParticipationEntry>(entries: T[]) {
   const members = new Map<string, { memberId: string; name: string; externalId: string; minutes: number; counted: number; entries: T[] }>();

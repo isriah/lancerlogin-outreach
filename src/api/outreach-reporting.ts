@@ -3,7 +3,7 @@
 import { filterAndSortReportRows, reportFilterSelection, reportMemberIncluded, reportMemberValues, reportRosterData, reportRow, type D1Database, type NormalizedReportDefinition, type ReportCell, type ReportProjectionContext, type ReportProjectionHandler } from "@lancerlogin/module-sdk/api";
 
 type OutreachActivityLabel = { id: string; name: string };
-type OutreachEntry = { id: string; memberId: string; activityId: string; activityTitle: string; serviceDate: string; startLocal: string; endLocal: string; durationMinutes: number; channel: string; status: string; activityMode: string; teamId: string | null; activityLabels: OutreachActivityLabel[] };
+type OutreachEntry = { id: string; memberId: string; activityId: string; activityTitle: string; serviceDate: string; startLocal: string; endLocal: string; durationMinutes: number; channel: string; status: string; timing: string; activityMode: string; teamId: string | null; activityLabels: OutreachActivityLabel[] };
 
 function parseOutreachLabels(value: string) { return JSON.parse(value) as OutreachActivityLabel[]; }
 function outreachLabelsMatch(definition: NormalizedReportDefinition, labels: OutreachActivityLabel[]) {
@@ -15,7 +15,7 @@ function outreachLabelsMatch(definition: NormalizedReportDefinition, labels: Out
 function outreachLabelText(labels: OutreachActivityLabel[]) { return labels.map((label) => label.name).sort((a, b) => a.localeCompare(b)).join("; ") || "None"; }
 
 async function outreachEntries(db: D1Database, context: ReportProjectionContext, includeVoided = false) {
-  const result = await db.prepare(`SELECT e.id,e.member_id AS memberId,e.activity_id AS activityId,a.title AS activityTitle,e.service_date AS serviceDate,e.start_local AS startLocal,e.end_local AS endLocal,e.duration_minutes AS durationMinutes,e.channel,e.status,a.mode AS activityMode,a.team_id AS teamId,
+  const result = await db.prepare(`SELECT e.id,e.member_id AS memberId,e.activity_id AS activityId,a.title AS activityTitle,e.service_date AS serviceDate,e.start_local AS startLocal,e.end_local AS endLocal,e.duration_minutes AS durationMinutes,e.channel,e.status,e.timing,a.mode AS activityMode,a.team_id AS teamId,
     COALESCE((SELECT json_group_array(json_object('id',labels.id,'name',labels.name)) FROM (SELECT l.id,l.name FROM hours_activity_labels al JOIN hours_labels l ON l.installation_id=al.installation_id AND l.id=al.label_id WHERE al.installation_id=a.installation_id AND al.activity_id=a.id ORDER BY l.name,l.id) labels),'[]') AS activityLabels
     FROM hours_entries e JOIN hours_activities a ON a.installation_id=e.installation_id AND a.id=e.activity_id
     WHERE e.installation_id='primary' AND (? IS NULL OR e.service_date>=?) AND e.service_date<=? ${includeVoided ? "" : "AND e.status='counted'"} ORDER BY e.service_date,e.id`).bind(context.from ?? null, context.from ?? null, context.to).all<Omit<OutreachEntry, "activityLabels"> & { activityLabels: string }>();
@@ -66,7 +66,11 @@ async function projectOutreachEntries(db: D1Database, definition: NormalizedRepo
     "outreach.entry.id": { text: entry.id, sortValue: entry.id }, "outreach.entry.member": { text: members.get(entry.memberId) ?? "Unavailable member", sortValue: (members.get(entry.memberId) ?? "").toLocaleLowerCase() },
     "outreach.entry.activity-id": { text: entry.activityId, sortValue: entry.activityId }, "outreach.entry.activity": { text: entry.activityTitle, sortValue: entry.activityTitle.toLocaleLowerCase() }, "outreach.entry.date": { text: entry.serviceDate, sortValue: entry.serviceDate },
     "outreach.entry.labels": { text: outreachLabelText(entry.activityLabels), sortValue: outreachLabelText(entry.activityLabels).toLocaleLowerCase(), empty: !entry.activityLabels.length },
-    "outreach.entry.start": { text: entry.startLocal, sortValue: entry.startLocal }, "outreach.entry.end": { text: entry.endLocal, sortValue: entry.endLocal }, "outreach.entry.minutes": { text: String(entry.durationMinutes), sortValue: entry.durationMinutes },
+    // Duration-only entries have no start or end time; their stored interval is only an anchor.
+    ...entry.timing === "duration"
+      ? { "outreach.entry.start": { text: "N/A", sortValue: null }, "outreach.entry.end": { text: "N/A", sortValue: null } }
+      : { "outreach.entry.start": { text: entry.startLocal, sortValue: entry.startLocal }, "outreach.entry.end": { text: entry.endLocal, sortValue: entry.endLocal } },
+    "outreach.entry.minutes": { text: String(entry.durationMinutes), sortValue: entry.durationMinutes },
     "outreach.entry.channel": { text: entry.channel, sortValue: entry.channel }, "outreach.entry.status": { text: entry.status, sortValue: entry.status },
   })));
 }

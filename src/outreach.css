@@ -79,21 +79,31 @@
 :where([data-module="hour-tracking"]) .outreach-clock-face button.selected,:where([data-module="hour-tracking"]) .outreach-clock-period button.selected { border-color: var(--primary); color: var(--on-primary); background: var(--primary); }
 :where([data-module="hour-tracking"]) .outreach-clock-period { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); max-width: 15rem; margin: var(--space-8) auto; }
 .app :where([data-module="hour-tracking"]) .outreach-clock-period button.ui-button { width: 100%; padding: var(--space-4); font-size: 1.25rem; }
-:where([data-module="hour-tracking"]) .public-outreach-page { display: grid; gap: var(--space-5); width: min(46rem,calc(100% - 2rem)); margin: var(--space-6) auto; }
+/* The public form fits a 1280x720 laptop viewport without scrolling for each choice; phones may scroll. */
+:where([data-module="hour-tracking"]) .public-outreach-page { display: grid; gap: var(--space-3); width: min(52rem,calc(100% - 2rem)); margin: calc(-1 * var(--space-5)) auto 0; }
 :where([data-module="hour-tracking"]) .public-outreach-intro,:where([data-module="hour-tracking"]) .public-outreach-receipt { display: grid; gap: var(--space-3); }
 :where([data-module="hour-tracking"]) .public-outreach-intro > *,:where([data-module="hour-tracking"]) .public-outreach-receipt > * { margin: 0; }
-:where([data-module="hour-tracking"]) .public-outreach-intro > .ui-button { justify-self: start; }
-:where([data-module="hour-tracking"]) .public-outreach-form { grid-template-columns: minmax(0,1fr); padding: var(--space-5); }
+:where([data-module="hour-tracking"]) .public-outreach-intro { grid-template-columns: minmax(0,1fr) auto; align-items: end; }
+:where([data-module="hour-tracking"]) .public-outreach-intro h1 { font-size: clamp(1.6rem,3vw,2.2rem); }
+:where([data-module="hour-tracking"]) .public-outreach-intro .kicker { margin: 0 0 var(--space-1); }
+:where([data-module="hour-tracking"]) .public-outreach-intro > .ui-button { justify-self: end; }
+:where([data-module="hour-tracking"]) .public-outreach-form { grid-template-columns: minmax(0,1fr); gap: var(--space-3); padding: var(--space-4) var(--space-5); }
+:where([data-module="hour-tracking"]) .public-outreach-form .outreach-time-grid { gap: var(--space-3); }
+:where([data-module="hour-tracking"]) .public-outreach-row { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); align-items: start; gap: var(--space-3); }
+:where([data-module="hour-tracking"]) .public-outreach-row--team { grid-template-columns: minmax(0,8rem) minmax(0,9rem) minmax(0,1fr); }
+:where([data-module="hour-tracking"]) .public-outreach-actions { align-items: center; }
+:where([data-module="hour-tracking"]) .public-outreach-actions .field-help { flex: 1 1 16rem; }
+:where([data-module="hour-tracking"]) .public-outreach-choice { margin: 0; }
+:where([data-module="hour-tracking"]) .public-outreach-choice legend { margin-bottom: var(--space-2); }
+:where([data-module="hour-tracking"]) .public-outreach-choice > div { grid-template-columns: repeat(3,minmax(0,1fr)); width: 100%; }
 :where([data-module="hour-tracking"]) .public-outreach-form > * { min-width: 0; max-width: 100%; }
 :where([data-module="hour-tracking"]) .public-outreach-form label { color: var(--ui-text); font-family: var(--font-body); font-size: var(--text-body); font-weight: 750; }
 :where([data-module="hour-tracking"]) .public-outreach-form input:not([type="radio"]):not([type="checkbox"]),:where([data-module="hour-tracking"]) .public-outreach-form select,:where([data-module="hour-tracking"]) .public-outreach-form textarea { width: 100%; min-width: 0; max-width: 100%; }
-:where([data-module="hour-tracking"]) .public-outreach-form textarea { min-height: calc(var(--control-min-block-size) * 3); resize: vertical; }
+:where([data-module="hour-tracking"]) .public-outreach-form textarea { min-height: calc(var(--control-min-block-size) * 1.6); resize: vertical; }
 :where([data-module="hour-tracking"]) .public-outreach-form .field-help { margin: 0; color: var(--ui-text-muted); font-size: var(--text-small); font-weight: 400; }
 :where([data-module="hour-tracking"]) .public-outreach-receipt { padding: var(--space-6); }
 :where([data-module="hour-tracking"]) .public-outreach-receipt code { overflow-wrap: anywhere; }
 :where([data-module="hour-tracking"]) .public-outreach-receipt > .ui-button--primary { justify-self: start; }
-:where([data-module="hour-tracking"]) .public-outreach-staff { margin: 0; text-align: center; }
-:where([data-module="hour-tracking"]) .public-outreach-staff a { color: var(--primary); font-weight: 750; text-underline-offset: var(--space-1); }
 @media(max-width:760px) {
   :where([data-module="hour-tracking"]) .outreach-time-grid,:where([data-module="hour-tracking"]) .outreach-metrics { grid-template-columns: minmax(0,1fr); }
   :where([data-module="hour-tracking"]) .outreach-row,:where([data-module="hour-tracking"]) .outreach-total-row,:where([data-module="hour-tracking"]) .outreach-catalog-heading { align-items: stretch; flex-direction: column; }
@@ -102,7 +112,12 @@
 }
 @media(max-width:520px) {
   :where([data-module="hour-tracking"]) .outreach-activity-visibility > summary { min-width: 6.5rem; }
-  :where([data-module="hour-tracking"]) .public-outreach-page { width: min(100% - 1rem,46rem); margin-block: var(--space-3); }
+  :where([data-module="hour-tracking"]) .public-outreach-page { width: min(100% - 1rem,46rem); margin-block: 0 var(--space-3); }
+  :where([data-module="hour-tracking"]) .public-outreach-intro,:where([data-module="hour-tracking"]) .public-outreach-row { grid-template-columns: minmax(0,1fr); }
+  :where([data-module="hour-tracking"]) .public-outreach-row--team { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  :where([data-module="hour-tracking"]) .public-outreach-row--team > :last-child { grid-column: 1 / -1; }
+  :where([data-module="hour-tracking"]) .public-outreach-intro > .ui-button { justify-self: start; }
+  :where([data-module="hour-tracking"]) .public-outreach-choice label { padding-inline: var(--space-1); white-space: normal; text-align: center; line-height: 1.15; }
   :where([data-module="hour-tracking"]) .public-outreach-form,:where([data-module="hour-tracking"]) .public-outreach-receipt { padding: var(--space-4); }
   :where([data-module="hour-tracking"]) .public-outreach-form .module-actions { display: grid; }
   :where([data-module="hour-tracking"]) .public-outreach-form .module-actions button { width: 100%; }
@@ -216,3 +231,6 @@
   .app :where([data-module="hour-tracking"]) .outreach-submission-disclosure > summary::after { content: "+"; flex: none; }
   .app :where([data-module="hour-tracking"]) .outreach-submission-disclosure[open] > summary::after { content: "\2212"; }
 }
+/* Supported teams a member added from the public form, until Staff mark them reviewed. */
+:where([data-module="hour-tracking"]) .outreach-team-source { display: inline-block; width: fit-content; margin-inline-start: var(--space-2); padding: var(--space-1) var(--space-3); border: 1px solid currentColor; border-radius: var(--radius-pill); font-size: var(--text-caption); font-weight: 800; }
+:where([data-module="hour-tracking"]) .outreach-team-record .ui-button { margin-top: var(--space-2); }

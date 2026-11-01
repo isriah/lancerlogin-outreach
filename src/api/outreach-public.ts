@@ -2,6 +2,7 @@ import { addCalendarDays, instantToCivil } from "@lancerlogin/module-sdk";
 import type { D1Database } from "@lancerlogin/module-sdk/api";
 import { HttpError } from "@lancerlogin/module-sdk/api";
 import { submitOutreachEntry } from "./outreach-entries.ts";
+import { archivedTeamForMembers, closedActivityForMembers, otherServiceUnavailable, teamSupportUnavailable } from "./outreach-team-support.ts";
 import { requestOutreachCorrection } from "./outreach-review.ts";
 import { readPublicFormSettings, validatePublicMember } from "./outreach-public-settings.ts";
 
@@ -45,7 +46,8 @@ async function clockContext(db: D1Database, now: number) {
 function publicReceipt(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new HttpError(409, "The Outreach submission result could not be confirmed");
   const row = value as Row;
-  return { id: row.id, serviceDate: row.serviceDate, startLocal: row.startLocal, endLocal: row.endLocal, durationMinutes: row.durationMinutes, channel: row.channel, createdAt: row.createdAt };
+  // Receipts saved before entries recorded their timing always had clock times.
+  return { id: row.id, serviceDate: row.serviceDate, startLocal: row.startLocal, endLocal: row.endLocal, durationMinutes: row.durationMinutes, timing: row.timing ?? "clock", channel: row.channel, createdAt: row.createdAt };
 }
 
 function requireSameOrigin(request: Request, allowedOrigin: string) {
@@ -131,6 +133,7 @@ async function publicInputError(db: D1Database, error: HttpError, correction: bo
     "This time overlaps already counted Outreach participation",
     "Choose a valid Outreach activity for this correction", "Provide the selected Outreach activity", "Receipt and activity do not match",
     "Provide only supported Outreach entry fields", "Provide only supported correction fields",
+    archivedTeamForMembers, teamSupportUnavailable, otherServiceUnavailable, closedActivityForMembers,
   ];
   const known = safe.includes(error.message) || error.message.startsWith("This service date is outside the current ") || error.status === 400 && !error.message.includes("identity");
   if (known) return { status: error.status, body: { error: error.message, code: "input_not_accepted", retryExact: false } };

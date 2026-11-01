@@ -2,7 +2,7 @@ import { addCalendarDays, instantToCivil } from "@lancerlogin/module-sdk";
 import { outreachReportingState } from "../shared/outreach-reporting.ts";
 import type { D1Database } from "@lancerlogin/module-sdk/api";
 import { HttpError } from "@lancerlogin/module-sdk/api";
-import { resolveOutreachTiming } from "./outreach-entries.ts";
+import { revisedOutreachTiming } from "./outreach-entries.ts";
 
 type Row = Record<string, unknown>;
 type RouteResult = { status: number; body: unknown };
@@ -139,7 +139,7 @@ async function listCorrections(db: D1Database, url: URL): Promise<RouteResult> {
   const after = text(url.searchParams.get("after") ?? "", 128, false); const limit = integer(Number(url.searchParams.get("limit") ?? 50), 1, 100);
   const rows = (await db.prepare(`SELECT r.*,trim(m.first_name||' '||m.last_name) AS member_name,m.external_id,
     e.revision AS entry_revision,e.status AS entry_status,e.member_id AS entry_member_id,e.activity_id AS entry_activity_id,e.service_date AS entry_service_date,
-    e.start_local,e.end_local,e.start_occurrence,e.end_occurrence,e.duration_minutes,e.task_notes,COALESCE(a.title,requested.title) AS activity_title,
+    e.start_local,e.end_local,e.start_occurrence,e.end_occurrence,e.duration_minutes,e.task_notes,e.timing,COALESCE(a.title,requested.title) AS activity_title,
     x.action AS resolution_action,x.note AS resolution_note,x.created_at AS resolution_created_at
     FROM hours_correction_requests r JOIN members m ON m.installation_id=r.installation_id AND m.id=r.requester_member_id
     LEFT JOIN hours_entries e ON e.installation_id=r.installation_id AND e.id=r.entry_id LEFT JOIN hours_activities a ON a.installation_id=e.installation_id AND a.id=e.activity_id
@@ -152,12 +152,12 @@ async function listCorrections(db: D1Database, url: URL): Promise<RouteResult> {
 const entrySnapshotSql = `json_object('id',id,'member_id',member_id,'activity_id',activity_id,'service_date',service_date,'time_zone',time_zone,
   'start_local',start_local,'end_local',end_local,'start_occurrence',start_occurrence,'end_occurrence',end_occurrence,'start_ms',start_ms,'end_ms',end_ms,
   'start_offset_seconds',start_offset_seconds,'end_offset_seconds',end_offset_seconds,'duration_minutes',duration_minutes,'task_notes',task_notes,
-  'status',status,'channel',channel,'attribution',attribution,'actor_user_id',actor_user_id,'revision',revision,'created_at',created_at,'updated_at',updated_at)`;
+  'status',status,'channel',channel,'attribution',attribution,'actor_user_id',actor_user_id,'revision',revision,'created_at',created_at,'updated_at',updated_at,'timing',timing)`;
 
 async function resolveCorrection(db: D1Database, actor: string, requestId: string, inputValue: unknown, now: number): Promise<RouteResult> {
   if (!object(inputValue)) throw new HttpError(400, "Provide a correction decision");
   const action = text(inputValue.action, 20); if (!["acknowledged", "dismissed", "corrected", "voided"].includes(action)) throw new HttpError(400, "Choose a supported correction decision");
-  const allowed = new Set(["action", "note", "requestRevision", ...(action === "corrected" ? ["entryId", "entryRevision", "memberId", "activityId", "startLocal", "endLocal", "startOccurrence", "endOccurrence", "taskNotes"] : action === "voided" ? ["entryId", "entryRevision"] : [])]);
+  const allowed = new Set(["action", "note", "requestRevision", ...(action === "corrected" ? ["entryId", "entryRevision", "memberId", "activityId", "startLocal", "endLocal", "startOccurrence", "endOccurrence", "durationMinutes", "taskNotes"] : action === "voided" ? ["entryId", "entryRevision"] : [])]);
   if (Object.keys(inputValue).some((key) => !allowed.has(key))) throw new HttpError(400, "Provide only fields used by this correction decision");
   const note = text(inputValue.note, 4000); const requestRevision = integer(inputValue.requestRevision); const nowText = new Date(now).toISOString();
   const request = await db.prepare("SELECT * FROM hours_correction_requests WHERE installation_id=? AND id=?").bind(installationId, requestId).first<Row>();
@@ -185,12 +185,12 @@ async function resolveCorrection(db: D1Database, actor: string, requestId: strin
   ]);
   if (!member || !activity || activityId !== entry.activity_id && Number(activity.archived)) throw new HttpError(409, "Correction member or activity changed; reload before resolving");
   const serviceDate = String(activityId === entry.activity_id ? entry.service_date : activity.service_date); const nextRevision = entryRevision + 1;
-  const timing = action === "voided" ? null : resolveOutreachTiming({
-    startLocal: inputValue.startLocal ?? entry.start_local,
-    endLocal: inputValue.endLocal ?? entry.end_local,
-    startOccurrence: inputValue.startOccurrence ?? entry.start_occurrence,
-    endOccurrence: inputValue.endOccurrence ?? entry.end_occurrence,
-  }, serviceDate, String(entry.time_zone), now);
+  // An omitted occurrence keeps the entry's own, as corrections always have.
+  const timing = action === "voided" ? null : revisedOutreachTiming(entry, {
+    ...inputValue,
+    ...(inputValue.startOccurrence == null ? { startOccurrence: undefined } : {}),
+    ...(inputValue.endOccurrence == null ? { endOccurrence: undefined } : {}),
+  }, serviceDate, now);
   const values = action === "voided" ? {
     member_id: entry.member_id, activity_id: entry.activity_id, service_date: entry.service_date, start_local: entry.start_local, end_local: entry.end_local,
     start_occurrence: entry.start_occurrence, end_occurrence: entry.end_occurrence, start_ms: entry.start_ms, end_ms: entry.end_ms,
@@ -232,7 +232,7 @@ async function correctionEntries(db: D1Database, requestId: string, url: URL): P
     .bind(installationId, requestId).first<Row>();
   if (!correction) throw new HttpError(404, "Correction request not found");
   if (!correction.activity_id) return { status: 200, body: { items: [], nextCursor: null } };
-  const rows = (await db.prepare(`SELECT id,member_id,activity_id,service_date,time_zone,start_local,end_local,start_occurrence,end_occurrence,duration_minutes,task_notes,status,revision
+  const rows = (await db.prepare(`SELECT id,member_id,activity_id,service_date,time_zone,start_local,end_local,start_occurrence,end_occurrence,duration_minutes,task_notes,timing,status,revision
     FROM hours_entries WHERE installation_id=? AND member_id=? AND activity_id=? AND id>? ORDER BY id LIMIT ?`)
     .bind(installationId, correction.requester_member_id, correction.activity_id, after, limit + 1).all<Row>()).results ?? [];
   return { status: 200, body: { items: rows.slice(0, limit).map(serialize), nextCursor: rows.length > limit ? rows[limit - 1]!.id : null } };

@@ -1,6 +1,9 @@
 import { addCalendarDays, CivilTimeError, elapsedIntegerMinutes, instantToCivil, selectCivilTime, type CivilTimeOccurrence } from "@lancerlogin/module-sdk";
 import type { D1Database } from "@lancerlogin/module-sdk/api";
 import { HttpError } from "@lancerlogin/module-sdk/api";
+import { outreachPrograms } from "../shared/outreach-programs.ts";
+import { outreachDayStartsAt } from "../shared/outreach-reporting.ts";
+import { archivedTeamForMembers, closedActivityForMembers, ensureOtherServiceActivity, ensureSupportedTeam, ensureTeamSupportActivity, findOtherServiceActivity, findTeamSupportActivity } from "./outreach-team-support.ts";
 
 type Row = Record<string, unknown>;
 type RouteResult = { status: number; body: unknown };
@@ -35,7 +38,9 @@ function integer(value: unknown, minimum = 0, maximum = Number.MAX_SAFE_INTEGER 
   return Number(value);
 }
 
-function canonical(value: Row) { return JSON.stringify(Object.fromEntries(Object.keys(value).sort().map((key) => [key, value[key]]))); }
+// Keys sort at every depth, so a nested new-team object fingerprints the same whatever its key order.
+const sorted = (value: unknown): unknown => object(value) ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, sorted(value[key])])) : value;
+function canonical(value: Row) { return JSON.stringify(sorted(value)); }
 async function sha256(value: string) { return Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)))).map((byte) => byte.toString(16).padStart(2, "0")).join(""); }
 
 export function resolveOutreachTiming(input: Row, serviceDate: string, timeZone: string, now: number, allowFuture = false) {
@@ -52,6 +57,41 @@ export function resolveOutreachTiming(input: Row, serviceDate: string, timeZone:
     if (error instanceof CivilTimeError) throw new HttpError(400, error.message);
     throw error;
   }
+}
+
+/** Self-logged entries record whole minutes, from one minute to one day. */
+export const maximumDurationMinutes = 24 * 60;
+export function outreachDurationMinutes(value: unknown) {
+  if (!Number.isSafeInteger(value) || Number(value) < 1 || Number(value) > maximumDurationMinutes) throw new HttpError(400, `Enter a duration of 1 to ${maximumDurationMinutes} whole minutes`);
+  return Number(value);
+}
+
+/**
+ * Interval columns for a duration-only entry: anchored at the first instant of the service day, so the stored interval
+ * equals the duration. The anchor is not a time the member was present; duration-only entries never overlap others.
+ */
+export function durationOutreachTiming(serviceDate: string, timeZone: string, durationMinutes: unknown) {
+  const minutes = outreachDurationMinutes(durationMinutes);
+  try {
+    const startMs = outreachDayStartsAt(serviceDate, timeZone); const endMs = startMs + minutes * 60_000;
+    const start = instantToCivil(startMs, timeZone); const end = instantToCivil(endMs, timeZone);
+    return { startLocal: start.time.slice(0, 5), endLocal: end.time.slice(0, 5), startOccurrence: null, endOccurrence: null, startMs, endMs, startOffsetSeconds: start.offsetSeconds, endOffsetSeconds: end.offsetSeconds, durationMinutes: minutes };
+  } catch (error) {
+    if (error instanceof CivilTimeError) throw new HttpError(400, error.message);
+    throw error;
+  }
+}
+
+/** Timing for an edited entry: clock entries take start and end times, duration-only entries take minutes. */
+export function revisedOutreachTiming(entry: Row, input: Row, serviceDate: string, now: number) {
+  if (entry.timing === "duration") {
+    if (["startLocal", "endLocal", "startOccurrence", "endOccurrence"].some((key) => input[key] !== undefined)) throw new HttpError(400, "This entry records a duration only; edit its minutes instead of start and end times");
+    return durationOutreachTiming(serviceDate, String(entry.time_zone), input.durationMinutes ?? entry.duration_minutes);
+  }
+  if (input.durationMinutes !== undefined) throw new HttpError(400, "This entry records start and end times; edit those instead of its minutes");
+  return resolveOutreachTiming({ startLocal: input.startLocal ?? entry.start_local, endLocal: input.endLocal ?? entry.end_local,
+    startOccurrence: input.startOccurrence === undefined ? entry.start_occurrence : input.startOccurrence,
+    endOccurrence: input.endOccurrence === undefined ? entry.end_occurrence : input.endOccurrence }, serviceDate, String(entry.time_zone), now);
 }
 
 async function context(db: D1Database, now: number): Promise<RouteResult> {
@@ -87,7 +127,7 @@ const snapshotSql = `json_object(
   'start_local',start_local,'end_local',end_local,'start_occurrence',start_occurrence,'end_occurrence',end_occurrence,
   'start_ms',start_ms,'end_ms',end_ms,'start_offset_seconds',start_offset_seconds,'end_offset_seconds',end_offset_seconds,
   'duration_minutes',duration_minutes,'task_notes',task_notes,'status',status,'channel',channel,'attribution',attribution,
-  'actor_user_id',actor_user_id,'revision',revision,'created_at',created_at,'updated_at',updated_at)`;
+  'actor_user_id',actor_user_id,'revision',revision,'created_at',created_at,'updated_at',updated_at,'timing',timing)`;
 
 async function resolveMember(db: D1Database, contextValue: OutreachEntryContext, input: Row) {
   if (contextValue.channel === "staff") return db.prepare("SELECT id,active,external_id AS externalId FROM members WHERE installation_id=? AND id=?").bind(installationId, text(input.memberId)).first<Row>();
@@ -95,6 +135,62 @@ async function resolveMember(db: D1Database, contextValue: OutreachEntryContext,
   const discordUserId = text(contextValue.discordUserId, 24);
   if (!/^\d{10,24}$/.test(discordUserId)) throw new HttpError(400, "Linked member identity is unavailable");
   return db.prepare("SELECT id,active,external_id AS externalId FROM members WHERE installation_id=? AND discord_user_id=? AND active=1").bind(installationId, discordUserId).first<Row>();
+}
+
+/** What a public submission logs: time at a Staff-created dated activity, or self-logged Team support or Other service. */
+type EntryKind = "activity" | "team" | "other";
+const selfLoggedFields = ["kind", "memberExternalId", "serviceDate", "durationMinutes", "teamId", "team", "taskNotes", "idempotencyKey", "expectedTimeZone"];
+/** Longest Other service description and Team support note a member can enter. */
+export const otherDescriptionLength = 150;
+export const teamNoteLength = 500;
+
+/** The fields of a self-logged submission, checked before anything is looked up or created. */
+function selfLoggedInput(kind: Exclude<EntryKind, "activity">, input: Row) {
+  const durationMinutes = outreachDurationMinutes(input.durationMinutes);
+  if (kind === "other") {
+    if (input.teamId !== undefined || input.team !== undefined) throw new HttpError(400, "Other service does not take a supported team");
+    if (typeof input.taskNotes !== "string" || !input.taskNotes.trim() || input.taskNotes.trim().length > otherDescriptionLength) throw new HttpError(400, `Describe the service in 1 to ${otherDescriptionLength} characters`);
+    return { durationMinutes, notes: input.taskNotes.trim(), team: undefined };
+  }
+  const notes = input.taskNotes === undefined ? "" : typeof input.taskNotes === "string" && input.taskNotes.trim().length <= teamNoteLength ? input.taskNotes.trim() : undefined;
+  if (notes === undefined) throw new HttpError(400, `Keep the note to ${teamNoteLength} characters or fewer`);
+  if ((input.teamId === undefined) === (input.team === undefined)) throw new HttpError(400, "Choose a supported team or enter a new one");
+  if (input.teamId !== undefined) return { durationMinutes, notes, team: { id: text(input.teamId) } };
+  if (!object(input.team) || Object.keys(input.team).some((key) => !["number", "program", "name"].includes(key))) throw new HttpError(400, "Enter the new team's number, program and name");
+  const { number: teamNumber, program, name } = input.team;
+  if (typeof teamNumber !== "string" || !teamNumber.trim() || teamNumber.trim().length > 32) throw new HttpError(400, "Enter the new team's number in 32 characters or fewer");
+  if (!outreachPrograms.includes(program as typeof outreachPrograms[number])) throw new HttpError(400, "Choose Explore, Challenge, FTC, or FRC as the team program");
+  if (typeof name !== "string" || !name.trim() || name.trim().length > 150) throw new HttpError(400, "Enter the new team's name in 150 characters or fewer");
+  return { durationMinutes, notes, team: { number: teamNumber.trim(), program: program as string, name: name.trim() } };
+}
+
+/** The canonical Team Support or Other Service activity a self-logged entry belongs to, when it exists already. */
+async function existingSelfLoggedActivity(db: D1Database, kind: Exclude<EntryKind, "activity">, serviceDate: string, input: ReturnType<typeof selfLoggedInput>) {
+  if (kind === "other") return findOtherServiceActivity(db, serviceDate, input.notes);
+  const teamId = input.team && "id" in input.team ? input.team.id : undefined;
+  return teamId ? findTeamSupportActivity(db, teamId, serviceDate) : undefined;
+}
+
+/**
+ * Find or create the supported team and activity for a self-logged entry: the Team Support activity for that team and
+ * date, or the Other Service activity titled with the description on that date. Every step is idempotent, so retries are safe.
+ */
+async function selfLoggedActivity(db: D1Database, kind: Exclude<EntryKind, "activity">, input: ReturnType<typeof selfLoggedInput>, serviceDate: string, now: number) {
+  const caller = { channel: "public" } as const; const team = input.team; let activityId: string;
+  if (kind === "other") activityId = (await ensureOtherServiceActivity(db, caller, { serviceDate, title: input.notes }, now)).activityId;
+  else {
+    let teamId: string;
+    if (team && "id" in team) {
+      const chosen = await db.prepare("SELECT id,archived FROM hours_teams WHERE installation_id=? AND id=?").bind(installationId, team.id).first<Row>();
+      if (!chosen) throw new HttpError(400, "Choose a team from the supported teams list or enter a new one");
+      if (Number(chosen.archived)) throw new HttpError(409, archivedTeamForMembers);
+      teamId = String(chosen.id);
+    } else teamId = (await ensureSupportedTeam(db, caller, team, now)).team.id;
+    activityId = (await ensureTeamSupportActivity(db, caller, { teamId, serviceDate }, now)).activityId;
+  }
+  const activity = await db.prepare("SELECT * FROM hours_activities WHERE installation_id=? AND id=?").bind(installationId, activityId).first<Row>();
+  if (!activity || Number(activity.archived)) throw new HttpError(409, closedActivityForMembers);
+  return activity;
 }
 
 async function resolveActivity(db: D1Database, input: Row, serviceDate: string) {
@@ -109,12 +205,17 @@ async function resolveActivity(db: D1Database, input: Row, serviceDate: string) 
 export async function submitOutreachEntry(db: D1Database, contextValue: OutreachEntryContext, inputValue: unknown, now = Date.now()): Promise<RouteResult> {
   if (!Number.isSafeInteger(now) || !Number.isFinite(new Date(now).getTime())) throw new HttpError(400, "Invalid current instant");
   if (!object(inputValue)) throw new HttpError(400, "Provide an Outreach entry");
-  const allowed = new Set(["activityId", "teamId", "serviceDate", "startLocal", "endLocal", "startOccurrence", "endOccurrence", "taskNotes", "idempotencyKey", "expectedTimeZone",
-    ...(contextValue.channel === "staff" ? ["memberId", "staffReason"] : contextValue.channel === "public" ? ["memberExternalId"] : [])]);
+  // Members log Team support and Other service without a Staff-created activity through the public form only.
+  const kind: EntryKind = contextValue.channel === "public" && (inputValue.kind === "team" || inputValue.kind === "other") ? inputValue.kind : "activity";
+  if (inputValue.kind !== undefined && inputValue.kind !== kind && !(contextValue.channel === "public" && inputValue.kind === "activity")) throw new HttpError(400, "Provide only supported Outreach entry fields");
+  const allowed = new Set(kind !== "activity" ? selfLoggedFields : ["activityId", "teamId", "serviceDate", "startLocal", "endLocal", "startOccurrence", "endOccurrence", "taskNotes", "idempotencyKey", "expectedTimeZone",
+    ...(contextValue.channel === "staff" ? ["memberId", "staffReason"] : contextValue.channel === "public" ? ["memberExternalId", "kind"] : [])]);
   if (Object.keys(inputValue).some((key) => !allowed.has(key))) throw new HttpError(400, "Provide only supported Outreach entry fields");
   const idempotencyKey = text(inputValue.idempotencyKey, 128);
   if (idempotencyKey.length < 16) throw new HttpError(400, "Use a submission key of 16 to 128 characters");
-  const expectedTimeZone = text(inputValue.expectedTimeZone, 100); const serviceDate = date(inputValue.serviceDate); const notes = text(inputValue.taskNotes ?? "", 4000, false);
+  const expectedTimeZone = text(inputValue.expectedTimeZone, 100); const serviceDate = date(inputValue.serviceDate);
+  const selfLogged = kind === "activity" ? undefined : selfLoggedInput(kind, inputValue);
+  const notes = selfLogged ? selfLogged.notes : text(inputValue.taskNotes ?? "", 4000, false);
   const staffReason = contextValue.channel === "staff" ? text(inputValue.staffReason, 4000) : "";
   const identity = contextValue.channel === "staff" ? contextValue.actor : contextValue.channel === "discord" ? contextValue.discordUserId : "public";
   const fingerprint = await sha256(canonical({ ...inputValue, channel: contextValue.channel, identity })); const keyHash = await sha256(idempotencyKey);
@@ -128,20 +229,27 @@ export async function submitOutreachEntry(db: D1Database, contextValue: Outreach
   const inWindow = serviceDate >= earliest;
   const member = await resolveMember(db, contextValue, inputValue);
   if (!member || contextValue.channel !== "staff" && !Number(member.active)) throw new HttpError(400, "Member identity is unavailable");
-  const nowText = new Date(now).toISOString(); const activity = await resolveActivity(db, inputValue, serviceDate);
-  const reopened = contextValue.channel !== "staff" && !inWindow && Boolean(await db.prepare(`SELECT 1 FROM hours_reopen_windows WHERE installation_id=? AND revoked=0 AND starts_ms<=? AND expires_ms>? AND (activity_id IS NULL OR activity_id=?) LIMIT 1`).bind(installationId, now, now, activity.id).first());
-  if (contextValue.channel !== "staff" && !inWindow && !reopened) throw new HttpError(409, `This service date is outside the current ${settings.reportingDays}-day reporting window`);
-  const resolved = resolveOutreachTiming(inputValue, serviceDate, settings.timeZone, now); const id = crypto.randomUUID(); const actor = contextValue.channel === "staff" ? contextValue.actor : null;
+  const nowText = new Date(now).toISOString();
+  const reopenedFor = async (activityId: string | null | undefined) => contextValue.channel !== "staff" && !inWindow && Boolean(await db.prepare(`SELECT 1 FROM hours_reopen_windows WHERE installation_id=? AND revoked=0 AND starts_ms<=? AND expires_ms>? AND (activity_id IS NULL OR activity_id=?) LIMIT 1`).bind(installationId, now, now, activityId ?? null).first());
+  const outsideWindow = () => new HttpError(409, `This service date is outside the current ${settings.reportingDays}-day reporting window`);
+  // A self-logged entry outside the reporting window needs a reopening that already covers it, checked before its team or
+  // activity is created, so a refused submission never adds catalog records.
+  if (selfLogged && !inWindow && !await reopenedFor(await existingSelfLoggedActivity(db, kind as Exclude<EntryKind, "activity">, serviceDate, selfLogged))) throw outsideWindow();
+  const activity = selfLogged ? await selfLoggedActivity(db, kind as Exclude<EntryKind, "activity">, selfLogged, serviceDate, now) : await resolveActivity(db, inputValue, serviceDate);
+  const reopened = await reopenedFor(String(activity.id));
+  if (contextValue.channel !== "staff" && !inWindow && !reopened) throw outsideWindow();
+  const timing = selfLogged ? "duration" : "clock";
+  const resolved = selfLogged ? durationOutreachTiming(serviceDate, settings.timeZone, selfLogged.durationMinutes) : resolveOutreachTiming(inputValue, serviceDate, settings.timeZone, now); const id = crypto.randomUUID(); const actor = contextValue.channel === "staff" ? contextValue.actor : null;
   const attribution = contextValue.channel === "staff" ? "staff_recorded" : contextValue.channel === "public" ? "self_asserted" : "linked_discord";
-  const entryValues = [String(member.id), String(activity.id), serviceDate, settings.timeZone, resolved.startLocal, resolved.endLocal, resolved.startOccurrence, resolved.endOccurrence, resolved.startMs, resolved.endMs, resolved.startOffsetSeconds, resolved.endOffsetSeconds, resolved.durationMinutes, notes];
+  const entryValues = [String(member.id), String(activity.id), serviceDate, settings.timeZone, resolved.startLocal, resolved.endLocal, resolved.startOccurrence, resolved.endOccurrence, resolved.startMs, resolved.endMs, resolved.startOffsetSeconds, resolved.endOffsetSeconds, resolved.durationMinutes, notes, timing];
   const auditId = crypto.randomUUID(); const channelIdentityGuard = contextValue.channel === "staff" ? "" : contextValue.channel === "public" ? "AND active=1 AND external_id=?" : "AND active=1 AND discord_user_id=?";
   const identityGuardValue = contextValue.channel === "public" ? text(inputValue.memberExternalId, 80) : contextValue.channel === "discord" ? contextValue.discordUserId : undefined;
   const reopenGuard = reopened ? "AND EXISTS(SELECT 1 FROM hours_reopen_windows WHERE installation_id=? AND revoked=0 AND starts_ms<=? AND expires_ms>? AND (activity_id IS NULL OR activity_id=?))" : "";
   const guardValues: unknown[] = [installationId, settings.revision, settings.reportingDays, installationId, settings.timeZone, installationId, member.id, ...(identityGuardValue === undefined ? [] : [identityGuardValue]), installationId, activity.id, activity.revision, ...(reopened ? [installationId, now, now, activity.id] : []), installationId, contextValue.channel, keyHash];
   try {
     const results = await db.batch([
-      db.prepare(`INSERT INTO hours_entries(installation_id,id,member_id,activity_id,service_date,time_zone,start_local,end_local,start_occurrence,end_occurrence,start_ms,end_ms,start_offset_seconds,end_offset_seconds,duration_minutes,task_notes,status,channel,attribution,actor_user_id,revision,created_at,updated_at)
-        SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'counted',?,?,?,0,?,? WHERE EXISTS(SELECT 1 FROM hours_entry_settings WHERE installation_id=? AND revision=? AND reporting_days=?)
+      db.prepare(`INSERT INTO hours_entries(installation_id,id,member_id,activity_id,service_date,time_zone,start_local,end_local,start_occurrence,end_occurrence,start_ms,end_ms,start_offset_seconds,end_offset_seconds,duration_minutes,task_notes,timing,status,channel,attribution,actor_user_id,revision,created_at,updated_at)
+        SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'counted',?,?,?,0,?,? WHERE EXISTS(SELECT 1 FROM hours_entry_settings WHERE installation_id=? AND revision=? AND reporting_days=?)
         AND EXISTS(SELECT 1 FROM organization_settings WHERE installation_id=? AND time_zone=?) AND EXISTS(SELECT 1 FROM members WHERE installation_id=? AND id=? ${channelIdentityGuard})
         AND EXISTS(SELECT 1 FROM hours_activities a WHERE a.installation_id=? AND a.id=? AND a.revision=? AND a.archived=0)
         ${reopenGuard} AND NOT EXISTS(SELECT 1 FROM hours_submission_keys WHERE installation_id=? AND channel=? AND key_hash=?)`)
@@ -185,7 +293,7 @@ async function listEntries(db: D1Database, url: URL): Promise<RouteResult> {
     clauses.push(`${column}${operator}?`); values.push(value);
   }
   const rows = (await db.prepare(`SELECT e.*,CASE WHEN e.channel='staff' THEN initial.reason ELSE NULL END AS staff_reason,
-    trim(m.first_name||' '||m.last_name) AS member_name,m.external_id,a.title AS activity_title,t.name AS team_name
+    trim(m.first_name||' '||m.last_name) AS member_name,m.external_id,a.title AS activity_title,a.mode AS activity_mode,t.name AS team_name
     FROM hours_entries e JOIN members m ON m.installation_id=e.installation_id AND m.id=e.member_id JOIN hours_activities a ON a.installation_id=e.installation_id AND a.id=e.activity_id
     LEFT JOIN hours_teams t ON t.installation_id=a.installation_id AND t.id=a.team_id
     LEFT JOIN hours_entry_revisions initial ON initial.installation_id=e.installation_id AND initial.entry_id=e.id AND initial.revision=0
@@ -196,7 +304,7 @@ async function listEntries(db: D1Database, url: URL): Promise<RouteResult> {
 async function reviseEntry(db: D1Database, actor: string, id: string, input: unknown, now: number): Promise<RouteResult> {
   if (!object(input) || !["corrected", "voided"].includes(String(input.action))) throw new HttpError(400, "Choose an entry edit or deletion");
   const voided = input.action === "voided";
-  const allowed = ["revision", "action", "reason", ...(voided ? [] : ["memberId", "activityId", "startLocal", "endLocal", "startOccurrence", "endOccurrence", "taskNotes"])];
+  const allowed = ["revision", "action", "reason", ...(voided ? [] : ["memberId", "activityId", "startLocal", "endLocal", "startOccurrence", "endOccurrence", "durationMinutes", "taskNotes"])];
   if (Object.keys(input).some(key => !allowed.includes(key))) throw new HttpError(400, "Provide only supported entry edit fields");
   const expected = integer(input.revision); const reason = text(input.reason, 4000);
   const entry = await db.prepare("SELECT * FROM hours_entries WHERE installation_id=? AND id=?").bind(installationId, id).first<Row>();
@@ -209,9 +317,7 @@ async function reviseEntry(db: D1Database, actor: string, id: string, input: unk
   ]);
   if (!member || !activity || activityId !== entry.activity_id && Number(activity.archived)) throw new HttpError(409, "Entry member or activity is unavailable");
   const serviceDate = String(activityId === entry.activity_id ? entry.service_date : activity.service_date);
-  const timing = voided ? null : resolveOutreachTiming({ startLocal: input.startLocal ?? entry.start_local, endLocal: input.endLocal ?? entry.end_local,
-    startOccurrence: input.startOccurrence === undefined ? entry.start_occurrence : input.startOccurrence,
-    endOccurrence: input.endOccurrence === undefined ? entry.end_occurrence : input.endOccurrence }, serviceDate, String(entry.time_zone), now);
+  const timing = voided ? null : revisedOutreachTiming(entry, input, serviceDate, now);
   const values = voided ? { status: "void" } : { member_id: memberId, activity_id: activityId, service_date: serviceDate,
     start_local: timing!.startLocal, end_local: timing!.endLocal, start_occurrence: timing!.startOccurrence, end_occurrence: timing!.endOccurrence,
     start_ms: timing!.startMs, end_ms: timing!.endMs, start_offset_seconds: timing!.startOffsetSeconds, end_offset_seconds: timing!.endOffsetSeconds,
@@ -248,7 +354,7 @@ async function entryDetail(db: D1Database, id: string, history: boolean): Promis
     return { status: 200, body: { items: rows.map((row) => ({ ...serialize(row), snapshot: serialize(JSON.parse(String(row.snapshot_json)) as Row) })) } };
   }
   const row = await db.prepare(`SELECT e.*,CASE WHEN e.channel='staff' THEN initial.reason ELSE NULL END AS staff_reason,
-    trim(m.first_name||' '||m.last_name) AS member_name,m.external_id,a.title AS activity_title,t.name AS team_name
+    trim(m.first_name||' '||m.last_name) AS member_name,m.external_id,a.title AS activity_title,a.mode AS activity_mode,t.name AS team_name
     FROM hours_entries e JOIN members m ON m.installation_id=e.installation_id AND m.id=e.member_id JOIN hours_activities a ON a.installation_id=e.installation_id AND a.id=e.activity_id
     LEFT JOIN hours_teams t ON t.installation_id=a.installation_id AND t.id=a.team_id
     LEFT JOIN hours_entry_revisions initial ON initial.installation_id=e.installation_id AND initial.entry_id=e.id AND initial.revision=0
