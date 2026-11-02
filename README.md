@@ -27,7 +27,7 @@ Outreach is LancerLogin's first official plugin. Every installation build includ
 | --- | --- | --- |
 | 1.0.x | `>=2.0.0-beta.11 <3.0.0` (Modular 2.0.0-beta.11 and later 2.x releases) | 1 |
 | 1.1.x | `>=2.0.0-beta.15 <3.0.0` (Modular 2.0.0-beta.15, the first Core with module SDK 1.1.0, and later 2.x releases) | 1 |
-| Next release | `>=2.1.0-beta.3 <3.0.0` (Core 2.1.0-beta.3, the first Core with module SDK 1.2.0 and its shared FIRST connection, `services.first`, and later 2.x releases) | 1 |
+| 1.2.x | `>=2.1.0-beta.3 <3.0.0` (Core 2.1.0-beta.3, the first Core with module SDK 1.2.0 and its shared FIRST connection, `services.first`, and later 2.x releases) | 1 |
 
 The supported Core range is the `lancerlogin.core` field in `package.json`. Composition refuses this plugin for a Core outside that range, before an installation build or web update starts. React and `@lancerlogin/module-sdk` are peer dependencies provided by Core; the `@lancerlogin/module-sdk` range also refuses a Core whose SDK is too old.
 
@@ -48,7 +48,7 @@ When a member adds a new team, the public form checks its number and program wit
 - **Found:** FIRST's name fills in the team name, which is locked until the number or program changes.
 - **Not found:** the form warns that FIRST has no such team, and the member can still submit with a typed name.
 - **Unavailable** (no credential for that program, FIRST rate limits or errors, or a number that is not 1 to 6 digits): the form says nothing and the member types the name.
-- FLL Challenge and Explore are checked too. Core reports them unavailable until it turns on FIRST's public team search.
+- FLL Challenge and Explore are checked too, with FIRST's public team search, which needs no credential.
 - On submission, Outreach checks again on the server before it adds the team, and stores FIRST's name instead of the typed one when FIRST finds the team. It asks only for a team that is not already on the supported teams list, and never refuses a submission because FIRST is unavailable or has no such team. Retrying an exact submission returns the saved receipt without asking again.
 - Core caches answers and allows each public visitor 10 uncached lookups a minute, so a rate-limited check reads as unavailable.
 
