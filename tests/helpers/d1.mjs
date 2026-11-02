@@ -38,6 +38,18 @@ export function coreBaselineDatabase() {
   return raw;
 }
 
+/**
+ * Core's own tables as Core defines them (tests/fixtures/core-tables.sql) in place of the minimal stand-ins above, then
+ * the adopted hours_* schema and this plugin's migrations. The tests that mirror Core's Outreach tests use it: they need
+ * Core's real users, members, meetings and platform_modules columns. Rows are left to the caller.
+ */
+export function coreSchemaDatabase() {
+  const raw = new DatabaseSync(":memory:");
+  raw.exec(readFileSync(new URL("tests/fixtures/core-tables.sql", root), "utf8"));
+  raw.exec(readFileSync(new URL("tests/fixtures/core-hours-schema.sql", root), "utf8"));
+  return applyPluginMigrations(raw);
+}
+
 export function applyPluginMigrations(raw) {
   // Each migration applies atomically, as Core's ledger applies one D1 batch per migration.
   for (const { sql } of pluginMigrations()) { raw.exec("BEGIN"); try { raw.exec(sql); raw.exec("COMMIT"); } catch (error) { raw.exec("ROLLBACK"); throw error; } }
