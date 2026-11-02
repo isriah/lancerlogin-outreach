@@ -29,7 +29,7 @@ const team = (overrides = {}) => ({ kind: "team", memberExternalId: "TEST-A", se
 const other = (overrides = {}) => ({ kind: "other", memberExternalId: "TEST-A", serviceDate: "2026-10-30", durationMinutes: 45, taskNotes: "STEM tutoring", idempotencyKey: key(), expectedTimeZone: zone, ...overrides });
 const entry = (db, id) => db.raw.prepare("SELECT * FROM hours_entries WHERE id=?").get(id);
 const activityOf = (db, id) => db.raw.prepare("SELECT a.* FROM hours_entries e JOIN hours_activities a ON a.id=e.activity_id WHERE e.id=?").get(id);
-async function supportedTeam(db, number = "1218", program = "FRC", name = "Test Robotics One") {
+async function supportedTeam(db, number = "99918", program = "FRC", name = "Test Robotics One") {
   return (await ensureSupportedTeam(db, { moduleId: "hour-tracking", userId: "admin" }, { number, program, name })).team;
 }
 
@@ -43,7 +43,7 @@ test("team support for a team on the supported teams list counts immediately as 
   // The duration is anchored at the first instant of the service day in the installation time zone.
   assert.equal(row.start_ms, Date.parse("2026-10-30T04:00:00.000Z"));
   const activity = activityOf(db, result.body.id);
-  assert.deepEqual({ mode: activity.mode, category: activity.category_id, team: activity.team_id, title: activity.title, date: activity.service_date }, { mode: "team", category: "team-support", team: existing.id, title: "Team support: 1218 Test Robotics One", date: "2026-10-30" });
+  assert.deepEqual({ mode: activity.mode, category: activity.category_id, team: activity.team_id, title: activity.title, date: activity.service_date }, { mode: "team", category: "team-support", team: existing.id, title: "Team support: 99918 Test Robotics One", date: "2026-10-30" });
   // Another member, and a second block for the same member, reuse that one Team Support activity. Duration-only time never overlaps.
   const second = await submit(db, team({ teamId: existing.id, memberExternalId: "TEST-B", durationMinutes: 30 }));
   const third = await submit(db, team({ teamId: existing.id, durationMinutes: 60 }));
@@ -77,13 +77,13 @@ test("a new team is added to the supported teams list once, flagged as added by 
   await submit(db, team({ team: { number: "9999", program: "FRC", name: "Test Robots FRC" }, serviceDate: "2026-10-28" }));
   assert.equal(count(db, "SELECT COUNT(*) AS n FROM hours_teams WHERE added_by_member=1"), 2);
   // A member who names an existing Staff-added team never flags it.
-  const staffTeam = await supportedTeam(db, "254", "FRC", "Test Staff Team");
-  await submit(db, team({ team: { number: "254", program: "FRC", name: "Whatever" } }));
+  const staffTeam = await supportedTeam(db, "99954", "FRC", "Test Staff Team");
+  await submit(db, team({ team: { number: "99954", program: "FRC", name: "Whatever" } }));
   assert.equal(db.raw.prepare("SELECT added_by_member FROM hours_teams WHERE id=?").get(staffTeam.id).added_by_member, 0);
 
   // Outreach Settings > Supported teams shows the flag, filters to member-added teams and lets Staff mark one reviewed.
   const listed = await catalog(db, "GET", "/admin/hours/teams?archived=all&limit=100");
-  assert.deepEqual(listed.body.items.map((item) => [item.number, item.program, item.addedByMember]).sort(), [["254", "FRC", false], ["9999", "FRC", true], ["9999", "FTC", true]]);
+  assert.deepEqual(listed.body.items.map((item) => [item.number, item.program, item.addedByMember]).sort(), [["99954", "FRC", false], ["9999", "FRC", true], ["9999", "FTC", true]]);
   assert.equal(listed.body.memberAddedCount, 2);
   const flagged = await catalog(db, "GET", "/admin/hours/teams?addedBy=member&limit=100");
   assert.deepEqual(flagged.body.items.map((item) => item.program).sort(), ["FRC", "FTC"]); assert.equal(flagged.body.total, 2);
@@ -222,10 +222,10 @@ test("reports count self-logged team support toward supported teams and show no 
   const teams = await outreachReportHandlers["outreach.teams"](db, definition, context);
   const cells = (row, ...fields) => fields.map((field) => row.values[field].text);
   assert.deepEqual(teams.map((row) => cells(row, "outreach.team.number", "outreach.team.participants", "outreach.team.activities", "outreach.team.entries", "outreach.team.minutes")).sort(),
-    [["1218", "2", "2", "2", "120"], ["5555", "1", "1", "1", "15"]]);
+    [["5555", "1", "1", "1", "15"], ["99918", "2", "2", "2", "120"]]);
   const activities = await outreachReportHandlers["outreach.activities"](db, definition, context);
   assert.deepEqual(activities.map((row) => cells(row, "outreach.activity.mode", "outreach.activity.title", "outreach.activity.minutes")).sort(),
-    [["Other service", "STEM tutoring", "60"], ["Team support", "Team support: 1218 Test Robotics One", "30"], ["Team support", "Team support: 1218 Test Robotics One", "90"], ["Team support", "Team support: 5555 Test Explorers", "15"]]);
+    [["Other service", "STEM tutoring", "60"], ["Team support", "Team support: 5555 Test Explorers", "15"], ["Team support", "Team support: 99918 Test Robotics One", "30"], ["Team support", "Team support: 99918 Test Robotics One", "90"]]);
   const entries = await outreachReportHandlers["outreach.entries"](db, definition, context);
   const row = entries.find((item) => item.id === added.id);
   assert.deepEqual(cells(row, "outreach.entry.start", "outreach.entry.end", "outreach.entry.minutes", "outreach.entry.channel"), ["N/A", "N/A", "15", "public"]);
@@ -265,7 +265,7 @@ test("the migration keeps existing teams and entries and still refuses overlappi
   const raw = coreBaselineDatabase();
   raw.exec(`INSERT INTO installations(id) VALUES ('primary'); INSERT INTO members(id,installation_id,external_id,first_name,last_name) VALUES ('member-a','primary','TEST-A','Test Student','A');
     INSERT INTO hours_categories(installation_id,id,name,mode,created_at,updated_at) VALUES ('primary','event','Event','event','2026-01-01','2026-01-01');
-    INSERT INTO hours_teams(installation_id,id,number,name,program,created_at,updated_at) VALUES ('primary','team-old','100','Test Old Team','FRC','2026-01-01','2026-01-01');
+    INSERT INTO hours_teams(installation_id,id,number,name,program,created_at,updated_at) VALUES ('primary','team-old','99910','Test Old Team','FRC','2026-01-01','2026-01-01');
     INSERT INTO hours_activities(installation_id,id,category_id,mode,service_date,title,created_at,updated_at) VALUES ('primary','event-old','event','event','2026-10-01','Synthetic Old Event','2026-01-01','2026-01-01');
     INSERT INTO hours_entries(installation_id,id,member_id,activity_id,service_date,time_zone,start_local,end_local,start_ms,end_ms,start_offset_seconds,end_offset_seconds,duration_minutes,channel,attribution,created_at,updated_at)
       VALUES ('primary','entry-old','member-a','event-old','2026-10-01','UTC','09:00','10:00',1000*3600*9,1000*3600*10,0,0,60,'public','self_asserted','2026-10-01','2026-10-01');`);

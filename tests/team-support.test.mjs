@@ -9,17 +9,17 @@ const count = (db, sql) => db.raw.prepare(sql).get().n;
 
 test("supported teams are found by number and program, and created once", async () => {
   const db = outreachDatabase();
-  assert.deepEqual(await findSupportedTeams(db, { number: "321", program: "FRC" }), { teams: [] });
-  const first = await ensureSupportedTeam(db, viaGrant, { number: " 321 ", name: "Lancers", program: "FRC" });
-  assert.equal(first.created, true); assert.equal(first.team.number, "321"); assert.equal(first.team.program, "FRC");
-  assert.deepEqual(await ensureSupportedTeam(db, viaGrant, { number: "321", name: "Other name", program: "FRC" }), { team: first.team, created: false });
+  assert.deepEqual(await findSupportedTeams(db, { number: "99921", program: "FRC" }), { teams: [] });
+  const first = await ensureSupportedTeam(db, viaGrant, { number: " 99921 ", name: "Test Team Alpha", program: "FRC" });
+  assert.equal(first.created, true); assert.equal(first.team.number, "99921"); assert.equal(first.team.program, "FRC");
+  assert.deepEqual(await ensureSupportedTeam(db, viaGrant, { number: "99921", name: "Other name", program: "FRC" }), { team: first.team, created: false });
   // The same number in another program is a different team.
-  assert.equal((await ensureSupportedTeam(db, viaGrant, { number: "321", name: "Lancers FTC", program: "FTC" })).created, true);
-  assert.equal((await findSupportedTeams(db, { number: "321", program: "FRC" })).teams.length, 1);
+  assert.equal((await ensureSupportedTeam(db, viaGrant, { number: "99921", name: "Test Team Alpha FTC", program: "FTC" })).created, true);
+  assert.equal((await findSupportedTeams(db, { number: "99921", program: "FRC" })).teams.length, 1);
   // Each creation is audited with the calling module and grant, and no user.
   const audits = db.raw.prepare("SELECT actor_user_id, action, metadata_json FROM audit_log ORDER BY created_at").all();
   assert.equal(audits.length, 2);
-  assert.deepEqual({ ...audits[0], metadata_json: JSON.parse(audits[0].metadata_json) }, { actor_user_id: null, action: "outreach.teams.created", metadata_json: { number: "321", program: "FRC", viaModule: "visits", grantId: "grant-1" } });
+  assert.deepEqual({ ...audits[0], metadata_json: JSON.parse(audits[0].metadata_json) }, { actor_user_id: null, action: "outreach.teams.created", metadata_json: { number: "99921", program: "FRC", viaModule: "visits", grantId: "grant-1" } });
 });
 
 test("an archived supported team is never revived or duplicated", async () => {
@@ -33,11 +33,11 @@ test("an archived supported team is never revived or duplicated", async () => {
 
 test("one Team Support activity per team and date, created idempotently", async () => {
   const db = outreachDatabase();
-  const { team } = await ensureSupportedTeam(db, { moduleId: "visits", userId: "admin" }, { number: "1218", name: "Vulcan Robotics", program: "FRC" });
+  const { team } = await ensureSupportedTeam(db, { moduleId: "visits", userId: "admin" }, { number: "99918", name: "Test Team Delta", program: "FRC" });
   const first = await ensureTeamSupportActivity(db, viaGrant, { teamId: team.id, serviceDate: "2026-11-02" });
   assert.equal(first.created, true);
   const row = db.raw.prepare("SELECT mode, category_id, title, impact_relevant, team_id FROM hours_activities").get();
-  assert.deepEqual({ ...row }, { mode: "team", category_id: "team-support", title: "Team support: 1218 Vulcan Robotics", impact_relevant: 1, team_id: team.id });
+  assert.deepEqual({ ...row }, { mode: "team", category_id: "team-support", title: "Team support: 99918 Test Team Delta", impact_relevant: 1, team_id: team.id });
   assert.deepEqual(await ensureTeamSupportActivity(db, viaGrant, { teamId: team.id, serviceDate: "2026-11-02", title: "Ignored" }), { activityId: first.activityId, created: false });
   const second = await ensureTeamSupportActivity(db, viaGrant, { teamId: team.id, serviceDate: "2026-11-04", title: "Swerve help" });
   assert.notEqual(second.activityId, first.activityId);
@@ -51,7 +51,7 @@ test("one Team Support activity per team and date, created idempotently", async 
 
 test("team support refuses archived teams, a retired activity type and invalid input", async () => {
   const db = outreachDatabase();
-  const { team } = await ensureSupportedTeam(db, viaGrant, { number: "100", name: "Wildhats", program: "FRC" });
+  const { team } = await ensureSupportedTeam(db, viaGrant, { number: "99910", name: "Test Team Epsilon", program: "FRC" });
   await assert.rejects(ensureTeamSupportActivity(db, viaGrant, { teamId: "missing", serviceDate: "2026-11-02" }), (error) => error.status === 404);
   db.raw.exec("UPDATE hours_categories SET archived=1");
   await assert.rejects(ensureTeamSupportActivity(db, viaGrant, { teamId: team.id, serviceDate: "2026-11-02" }), (error) => error.status === 409 && /Team Support is unavailable/.test(error.message));
