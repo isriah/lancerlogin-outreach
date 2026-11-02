@@ -24,11 +24,11 @@ test("supported teams are found by number and program, and created once", async 
 
 test("an archived supported team is never revived or duplicated", async () => {
   const db = outreachDatabase();
-  const { team } = await ensureSupportedTeam(db, viaGrant, { number: "5000", name: "Retired", program: "FTC" });
+  const { team } = await ensureSupportedTeam(db, viaGrant, { number: "99950", name: "Retired", program: "FTC" });
   db.raw.prepare("UPDATE hours_teams SET archived=1 WHERE id=?").run(team.id);
-  await assert.rejects(ensureSupportedTeam(db, viaGrant, { number: "5000", name: "Retired", program: "FTC" }), (error) => error.status === 409 && /archived/.test(error.message));
+  await assert.rejects(ensureSupportedTeam(db, viaGrant, { number: "99950", name: "Retired", program: "FTC" }), (error) => error.status === 409 && /archived/.test(error.message));
   assert.equal(count(db, "SELECT COUNT(*) AS n FROM hours_teams"), 1);
-  assert.deepEqual((await findSupportedTeams(db, { number: "5000", program: "FTC" })).teams.map((item) => item.archived), [true]);
+  assert.deepEqual((await findSupportedTeams(db, { number: "99950", program: "FTC" })).teams.map((item) => item.archived), [true]);
 });
 
 test("one Team Support activity per team and date, created idempotently", async () => {
@@ -59,6 +59,6 @@ test("team support refuses archived teams, a retired activity type and invalid i
   db.raw.prepare("UPDATE hours_teams SET archived=1 WHERE id=?").run(team.id);
   await assert.rejects(ensureTeamSupportActivity(db, viaGrant, { teamId: team.id, serviceDate: "2026-11-02" }), (error) => error.status === 409 && /archived/.test(error.message));
   for (const input of [null, {}, { teamId: team.id, serviceDate: "2026-02-30" }, { teamId: team.id, serviceDate: "Nov 2" }, { teamId: team.id, serviceDate: "2026-11-02", title: "" }]) await assert.rejects(ensureTeamSupportActivity(db, viaGrant, input), (error) => error.status === 400, JSON.stringify(input));
-  for (const input of [null, { number: "1", name: "A", program: "Other" }, { number: "", name: "A", program: "FRC" }, { number: "1", name: " ", program: "FRC" }, { number: "x".repeat(33), name: "A", program: "FRC" }]) await assert.rejects(ensureSupportedTeam(db, viaGrant, input), (error) => error.status === 400, JSON.stringify(input));
+  for (const input of [null, { number: "99981", name: "A", program: "Other" }, { number: "", name: "A", program: "FRC" }, { number: "99981", name: " ", program: "FRC" }, { number: "x".repeat(33), name: "A", program: "FRC" }]) await assert.rejects(ensureSupportedTeam(db, viaGrant, input), (error) => error.status === 400, JSON.stringify(input));
   assert.equal(count(db, "SELECT COUNT(*) AS n FROM hours_activities"), 0);
 });

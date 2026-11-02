@@ -62,19 +62,19 @@ test("team support for a team on the supported teams list counts immediately as 
 
 test("a new team is added to the supported teams list once, flagged as added by a member", async () => {
   const db = outreachDatabase();
-  const first = await submit(db, team({ team: { number: " 9999 ", program: "FTC", name: "Test Robots" } }));
+  const first = await submit(db, team({ team: { number: " 99999 ", program: "FTC", name: "Test Robots" } }));
   assert.equal(first.status, 201);
   const added = db.raw.prepare("SELECT * FROM hours_teams").get();
-  assert.deepEqual({ number: added.number, program: added.program, name: added.name, flagged: added.added_by_member, archived: added.archived }, { number: "9999", program: "FTC", name: "Test Robots", flagged: 1, archived: 0 });
+  assert.deepEqual({ number: added.number, program: added.program, name: added.name, flagged: added.added_by_member, archived: added.archived }, { number: "99999", program: "FTC", name: "Test Robots", flagged: 1, archived: 0 });
   assert.equal(activityOf(db, first.body.id).team_id, added.id);
   const audit = db.raw.prepare("SELECT actor_user_id,metadata_json FROM audit_log WHERE action='outreach.teams.created'").get();
-  assert.deepEqual({ actor: audit.actor_user_id, metadata: JSON.parse(audit.metadata_json) }, { actor: null, metadata: { number: "9999", program: "FTC", addedByMember: true, channel: "public" } });
+  assert.deepEqual({ actor: audit.actor_user_id, metadata: JSON.parse(audit.metadata_json) }, { actor: null, metadata: { number: "99999", program: "FTC", addedByMember: true, channel: "public" } });
   // The same number and program, in any letter case or spacing, is the same team; its first name is kept.
-  const second = await submit(db, team({ memberExternalId: "TEST-B", serviceDate: "2026-10-29", team: { name: "Different Name", program: "FTC", number: "9999  " } }));
+  const second = await submit(db, team({ memberExternalId: "TEST-B", serviceDate: "2026-10-29", team: { name: "Different Name", program: "FTC", number: "99999  " } }));
   assert.equal(second.status, 201); assert.equal(activityOf(db, second.body.id).team_id, added.id);
   assert.equal(count(db, "SELECT COUNT(*) AS n FROM hours_teams"), 1);
   // The same number in another program is another team.
-  await submit(db, team({ team: { number: "9999", program: "FRC", name: "Test Robots FRC" }, serviceDate: "2026-10-28" }));
+  await submit(db, team({ team: { number: "99999", program: "FRC", name: "Test Robots FRC" }, serviceDate: "2026-10-28" }));
   assert.equal(count(db, "SELECT COUNT(*) AS n FROM hours_teams WHERE added_by_member=1"), 2);
   // A member who names an existing Staff-added team never flags it.
   const staffTeam = await supportedTeam(db, "99954", "FRC", "Test Staff Team");
@@ -83,7 +83,7 @@ test("a new team is added to the supported teams list once, flagged as added by 
 
   // Outreach Settings > Supported teams shows the flag, filters to member-added teams and lets Staff mark one reviewed.
   const listed = await catalog(db, "GET", "/admin/hours/teams?archived=all&limit=100");
-  assert.deepEqual(listed.body.items.map((item) => [item.number, item.program, item.addedByMember]).sort(), [["99954", "FRC", false], ["9999", "FRC", true], ["9999", "FTC", true]]);
+  assert.deepEqual(listed.body.items.map((item) => [item.number, item.program, item.addedByMember]).sort(), [["99954", "FRC", false], ["99999", "FRC", true], ["99999", "FTC", true]]);
   assert.equal(listed.body.memberAddedCount, 2);
   const flagged = await catalog(db, "GET", "/admin/hours/teams?addedBy=member&limit=100");
   assert.deepEqual(flagged.body.items.map((item) => item.program).sort(), ["FRC", "FTC"]); assert.equal(flagged.body.total, 2);
@@ -92,10 +92,10 @@ test("a new team is added to the supported teams list once, flagged as added by 
   assert.equal(reviewed.body.addedByMember, false); assert.equal(reviewed.body.revision, 1);
   assert.equal(JSON.parse(db.raw.prepare("SELECT metadata_json FROM audit_log WHERE action='outreach.teams.updated'").get().metadata_json).memberAdditionReviewed, true);
   await assert.rejects(catalog(db, "PATCH", `/admin/hours/teams/${added.id}`, { revision: 1, addedByMember: true }), (error) => error.status === 400);
-  await assert.rejects(catalog(db, "POST", "/admin/hours/teams", { name: "Staff", number: "1", program: "FRC", addedByMember: true }), (error) => error.status === 400);
+  await assert.rejects(catalog(db, "POST", "/admin/hours/teams", { name: "Staff", number: "99981", program: "FRC", addedByMember: true }), (error) => error.status === 400);
   // A team Staff archived is never revived or duplicated by a member.
   db.raw.prepare("UPDATE hours_teams SET archived=1 WHERE id=?").run(added.id);
-  const refused = await submit(db, team({ team: { number: "9999", program: "FTC", name: "Test Robots" }, serviceDate: "2026-10-27" }));
+  const refused = await submit(db, team({ team: { number: "99999", program: "FTC", name: "Test Robots" }, serviceDate: "2026-10-27" }));
   assert.equal(refused.status, 409); assert.match(refused.body.error, /no longer on the supported teams list/); assert.equal(refused.body.retryExact, false);
   const byId = await submit(db, team({ teamId: added.id, serviceDate: "2026-10-27" }));
   assert.equal(byId.status, 409); assert.match(byId.body.error, /no longer on the supported teams list/);
@@ -135,21 +135,21 @@ test("self-logged submissions refuse invalid input without creating teams or act
   await refuse(other({ taskNotes: "x".repeat(151) }), 400, /Describe the service/);
   for (const durationMinutes of [0, -5, 1441, 1.5, "60", null, undefined]) await refuse(other({ durationMinutes }), 400, /duration of 1 to 1440 whole minutes/);
   await refuse(other({ serviceDate: "2026-09-30" }), 409, /outside the current 30-day reporting window/);
-  await refuse(team({ team: { number: "77", program: "FRC", name: "Test Late" }, serviceDate: "2026-10-01" }), 409, /outside the current 30-day reporting window/);
+  await refuse(team({ team: { number: "99977", program: "FRC", name: "Test Late" }, serviceDate: "2026-10-01" }), 409, /outside the current 30-day reporting window/);
   await refuse(other({ serviceDate: "2026-11-01" }), 409, /future service date/);
-  await refuse(team({ team: { number: "77", program: "VEX", name: "Test Wrong Program" } }), 400, /Choose Explore, Challenge, FTC, or FRC/);
+  await refuse(team({ team: { number: "99977", program: "VEX", name: "Test Wrong Program" } }), 400, /Choose Explore, Challenge, FTC, or FRC/);
   await refuse(team({ team: { number: "", program: "FRC", name: "Test No Number" } }), 400, /team's number/);
-  await refuse(team({ team: { number: "77", program: "FRC", name: " " } }), 400, /team's name/);
-  await refuse(team({ team: { number: "77", program: "FRC", name: "Test", city: "Nowhere" } }), 400, /number, program and name/);
+  await refuse(team({ team: { number: "99977", program: "FRC", name: " " } }), 400, /team's name/);
+  await refuse(team({ team: { number: "99977", program: "FRC", name: "Test", city: "Nowhere" } }), 400, /number, program and name/);
   await refuse(team({}), 400, /Choose a supported team or enter a new one/);
-  await refuse(team({ teamId: existing.id, team: { number: "77", program: "FRC", name: "Test" } }), 400, /Choose a supported team or enter a new one/);
+  await refuse(team({ teamId: existing.id, team: { number: "99977", program: "FRC", name: "Test" } }), 400, /Choose a supported team or enter a new one/);
   await refuse(team({ teamId: "missing-team" }), 400, /Choose a team from the supported teams list/);
   await refuse(team({ teamId: existing.id, taskNotes: "x".repeat(501) }), 400, /500 characters/);
   await refuse(other({ teamId: existing.id }), 400, /does not take a supported team/);
   await refuse(team({ teamId: existing.id, startLocal: "09:00", endLocal: "10:00" }), 400, /only supported Outreach entry fields/);
   await refuse(team({ teamId: existing.id, kind: "meeting" }), 400, /only supported Outreach entry fields/);
   // An unknown member is refused before a new team is added.
-  const unknown = await submit(db, team({ memberExternalId: "NOBODY", team: { number: "78", program: "FRC", name: "Test Unknown" } }));
+  const unknown = await submit(db, team({ memberExternalId: "NOBODY", team: { number: "99978", program: "FRC", name: "Test Unknown" } }));
   assert.equal(unknown.status, 400); assert.equal(unknown.body.code, "identity_not_verified");
   assert.equal(count(db, "SELECT COUNT(*) AS n FROM hours_teams"), 1);
   assert.equal(count(db, "SELECT COUNT(*) AS n FROM hours_activities"), 0);
@@ -167,13 +167,13 @@ test("a reopening lets members self-log for an earlier date", async () => {
 
 test("retrying the exact submission returns the original receipt and creates nothing new", async () => {
   const db = outreachDatabase();
-  const input = team({ team: { number: "4242", program: "Challenge", name: "Test Retry Team" } });
+  const input = team({ team: { number: "99942", program: "Challenge", name: "Test Retry Team" } });
   const first = await submit(db, input);
   assert.equal(first.status, 201);
   const again = await submit(db, structuredClone(input));
   assert.equal(again.status, 200); assert.deepEqual(again.body, first.body);
   // The new team's fields may arrive in any order.
-  const reordered = await submit(db, { ...input, team: { name: "Test Retry Team", program: "Challenge", number: "4242" } });
+  const reordered = await submit(db, { ...input, team: { name: "Test Retry Team", program: "Challenge", number: "99942" } });
   assert.equal(reordered.status, 200); assert.equal(reordered.body.id, first.body.id);
   assert.equal(count(db, "SELECT COUNT(*) AS n FROM hours_entries"), 1);
   assert.equal(count(db, "SELECT COUNT(*) AS n FROM hours_teams"), 1);
@@ -216,16 +216,16 @@ test("reports count self-logged team support toward supported teams and show no 
   const db = outreachDatabase(); const existing = await supportedTeam(db);
   await submit(db, team({ teamId: existing.id, durationMinutes: 90 }));
   await submit(db, team({ teamId: existing.id, memberExternalId: "TEST-B", serviceDate: "2026-10-29", durationMinutes: 30 }));
-  const { body: added } = await submit(db, team({ team: { number: "5555", program: "Explore", name: "Test Explorers" }, durationMinutes: 15 }));
+  const { body: added } = await submit(db, team({ team: { number: "99955", program: "Explore", name: "Test Explorers" }, durationMinutes: 15 }));
   await submit(db, other({ durationMinutes: 60 }));
   const context = { from: "2026-10-01", to: "2026-10-31", today: "2026-10-31" }; const definition = {};
   const teams = await outreachReportHandlers["outreach.teams"](db, definition, context);
   const cells = (row, ...fields) => fields.map((field) => row.values[field].text);
   assert.deepEqual(teams.map((row) => cells(row, "outreach.team.number", "outreach.team.participants", "outreach.team.activities", "outreach.team.entries", "outreach.team.minutes")).sort(),
-    [["5555", "1", "1", "1", "15"], ["99918", "2", "2", "2", "120"]]);
+    [["99918", "2", "2", "2", "120"], ["99955", "1", "1", "1", "15"]]);
   const activities = await outreachReportHandlers["outreach.activities"](db, definition, context);
   assert.deepEqual(activities.map((row) => cells(row, "outreach.activity.mode", "outreach.activity.title", "outreach.activity.minutes")).sort(),
-    [["Other service", "STEM tutoring", "60"], ["Team support", "Team support: 5555 Test Explorers", "15"], ["Team support", "Team support: 99918 Test Robotics One", "30"], ["Team support", "Team support: 99918 Test Robotics One", "90"]]);
+    [["Other service", "STEM tutoring", "60"], ["Team support", "Team support: 99918 Test Robotics One", "30"], ["Team support", "Team support: 99918 Test Robotics One", "90"], ["Team support", "Team support: 99955 Test Explorers", "15"]]);
   const entries = await outreachReportHandlers["outreach.entries"](db, definition, context);
   const row = entries.find((item) => item.id === added.id);
   assert.deepEqual(cells(row, "outreach.entry.start", "outreach.entry.end", "outreach.entry.minutes", "outreach.entry.channel"), ["N/A", "N/A", "15", "public"]);
@@ -236,7 +236,7 @@ test("reports count self-logged team support toward supported teams and show no 
 
 test("backups round-trip member-added teams and duration-only entries, and version 3 sections gain the defaults", async () => {
   const db = outreachDatabase();
-  await submit(db, team({ team: { number: "6006", program: "FTC", name: "Test Backup Team" } }));
+  await submit(db, team({ team: { number: "99906", program: "FTC", name: "Test Backup Team" } }));
   await submit(db, other());
   const exported = Object.fromEntries(Object.entries(outreachBackupTables).map(([table, columns]) => [table, db.raw.prepare(`SELECT ${columns.join(",")} FROM ${table} ORDER BY rowid`).all().map((row) => ({ ...row }))]));
   assert.equal(exported.hours_teams[0].added_by_member, 1);
