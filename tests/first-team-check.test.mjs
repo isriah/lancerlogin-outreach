@@ -40,14 +40,19 @@ function submit(db, input, first) {
 const newTeam = (team, overrides = {}) => ({ kind: "team", memberExternalId: "TEST-A", serviceDate: "2026-10-30", durationMinutes: 60, idempotencyKey: key(), expectedTimeZone: zone, team, ...overrides });
 const teams = (db) => db.raw.prepare("SELECT number,program,name,added_by_member AS flagged FROM hours_teams ORDER BY program,number").all().map((row) => ({ ...row }));
 
-test("a FIRST check answers found with FIRST's name, not found, or unavailable for anything else", async () => {
+test("a FIRST check answers found with FIRST's name and season, not found, or unavailable for anything else", async () => {
   const first = fakeFirst({ "FRC:99901": found(alpha), "FTC:99902": { status: "unavailable", reason: "rate-limited" }, "FRC:99903": new Error("synthetic failure"), "FTC:99904": found({ ...alpha, program: "FTC", name: "   " }) });
-  assert.deepEqual(await checkFirstTeam(first, "FRC", " 99901 "), { status: "found", name: "Test Team Alpha" });
+  assert.deepEqual(await checkFirstTeam(first, "FRC", " 99901 "), { status: "found", name: "Test Team Alpha", season: 2026 });
   assert.deepEqual(first.calls, [{ program: "FRC", number: "99901" }], "the number is trimmed before it is sent");
   assert.deepEqual(await checkFirstTeam(first, "FTC", "99999"), { status: "not-found" });
   assert.deepEqual(await checkFirstTeam(first, "FTC", "99902"), { status: "unavailable" });
   assert.deepEqual(await checkFirstTeam(first, "FRC", "99903"), { status: "unavailable" }, "a thrown error never escapes");
   assert.deepEqual(await checkFirstTeam(first, "FTC", "99904"), { status: "unavailable" }, "a found team needs a name");
+  // A missing or implausible season is left out; the team is still found by name.
+  for (const season of [undefined, null, "2026", 2026.5, 1999, 3000]) {
+    const answer = found({ ...alpha, season }); if (season === undefined) delete answer.team.season;
+    assert.deepEqual(await checkFirstTeam(fakeFirst({ "FRC:99901": answer }), "FRC", "99901"), { status: "found", name: "Test Team Alpha" }, `season ${season}`);
+  }
   // Long names are cut to the supported-team limit.
   assert.equal((await checkFirstTeam(fakeFirst({ "FRC:1": found({ ...alpha, number: "1", name: "T".repeat(200) }) }), "FRC", "1")).name.length, 150);
   // FIRST is never asked about a number it cannot hold, an unknown program, or without a connection.
@@ -59,7 +64,10 @@ test("a FIRST check answers found with FIRST's name, not found, or unavailable f
 
 test("the public team lookup returns only what the form needs", async () => {
   const first = fakeFirst({ "FRC:99901": found(alpha), "FTC:99902": { status: "unavailable", reason: "not-configured" } });
-  assert.deepEqual(await lookup(first, "program=FRC&number=99901"), { status: 200, body: { status: "found", name: "Test Team Alpha" } });
+  assert.deepEqual(await lookup(first, "program=FRC&number=99901"), { status: 200, body: { status: "found", name: "Test Team Alpha", season: 2026 } });
+  // FIRST's other team details, such as the location, stay on the server; a team without a season answers without one.
+  const { season: _season, ...seasonless } = alpha;
+  assert.deepEqual(await lookup(fakeFirst({ "FRC:99901": found(seasonless) }), "program=FRC&number=99901"), { status: 200, body: { status: "found", name: "Test Team Alpha" } });
   assert.deepEqual(await lookup(first, "program=FTC&number=99999"), { status: 200, body: { status: "not-found" } });
   // The reason FIRST is unavailable stays on the server.
   assert.deepEqual(await lookup(first, "number=99902&program=FTC"), { status: 200, body: { status: "unavailable" } });

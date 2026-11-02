@@ -59,7 +59,8 @@ function requireSameOrigin(request: Request, allowedOrigin: string) {
 
 /**
  * The public form's team-number check: `?program=&number=` with a FIRST program and a 1- to 6-digit number. It answers
- * only FIRST's team name, "not-found" or "unavailable", never FIRST's other team details or why it is unavailable.
+ * only FIRST's team name and the season FIRST found it in, "not-found" or "unavailable", never FIRST's other team
+ * details or why it is unavailable.
  */
 async function teamLookup(url: URL, first: FirstTeamLookup | undefined): Promise<RouteResult> {
   url.searchParams.forEach((_, key) => { if (!["program", "number"].includes(key) || url.searchParams.getAll(key).length !== 1) throw new HttpError(400, "Invalid team lookup"); });
