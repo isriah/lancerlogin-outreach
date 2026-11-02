@@ -20,7 +20,7 @@ const teamLabel = (team: Pick<Team, "number" | "name" | "program">) => `${team.n
 type CorrectionReceipt = { reference: string; status: string; createdAt: string };
 type Validation = { status: "checking" | "valid" | "invalid" | "unavailable"; text: string };
 /** What FIRST says about the team number and program a member enters for a new team, through Core's FIRST connection. */
-type TeamCheck = { key: string; status: "checking" | "found" | "not-found" | "unavailable"; name?: string };
+type TeamCheck = { key: string; status: "checking" | "found" | "not-found" | "unavailable"; name?: string; season?: number };
 // Kept in step with firstCheckableNumber in outreach-first.ts: FIRST team numbers are 1 to 6 digits.
 const firstCheckableNumber = /^\d{1,6}$/; const teamCheckDelayMs = 400;
 class PublicFormError extends Error {
@@ -129,14 +129,14 @@ export function PublicOutreachForm() {
     const controller = new AbortController(); const [program, number] = [teamCheckKey.slice(0, teamCheckKey.indexOf(":")), teamCheckKey.slice(teamCheckKey.indexOf(":") + 1)];
     const timer = window.setTimeout(() => {
       setTeamCheck({ key: teamCheckKey, status: "checking" });
-      void publicApi<{ status: "found" | "not-found" | "unavailable"; name?: string }>(`team-lookup?program=${encodeURIComponent(program)}&number=${encodeURIComponent(number)}`, { signal: controller.signal })
-        .then(result => { if (!controller.signal.aborted) setTeamCheck(result.status === "found" && result.name ? { key: teamCheckKey, status: "found", name: result.name } : { key: teamCheckKey, status: result.status === "not-found" ? "not-found" : "unavailable" }); })
+      void publicApi<{ status: "found" | "not-found" | "unavailable"; name?: string; season?: number }>(`team-lookup?program=${encodeURIComponent(program)}&number=${encodeURIComponent(number)}`, { signal: controller.signal })
+        .then(result => { if (!controller.signal.aborted) setTeamCheck(result.status === "found" && result.name ? { key: teamCheckKey, status: "found", name: result.name, ...(Number.isInteger(result.season) ? { season: result.season } : {}) } : { key: teamCheckKey, status: result.status === "not-found" ? "not-found" : "unavailable" }); })
         .catch(() => { if (!controller.signal.aborted) setTeamCheck({ key: teamCheckKey, status: "unavailable" }); });
     }, teamCheckDelayMs);
     return () => { window.clearTimeout(timer); controller.abort(); };
   }, [teamCheckKey]);
   const shownTeamName = firstName ?? typedTeamName;
-  const teamCheckHelp = currentCheck?.status === "checking" ? "Checking the team number with FIRST..." : firstName !== undefined ? "Name from FIRST. Change the number or program to edit it."
+  const teamCheckHelp = currentCheck?.status === "checking" ? "Checking the team number with FIRST..." : firstName !== undefined ? `Name from FIRST${currentCheck?.season !== undefined ? ` (${currentCheck.season} season)` : ""}. Change the number or program to edit it.`
     : currentCheck?.status === "not-found" ? `FIRST has no ${teamProgram} team ${teamNumber.trim()}. Check the number, or enter the team name to add it anyway.` : "";
   const body = useMemo(() => {
     if (!context) return undefined;
