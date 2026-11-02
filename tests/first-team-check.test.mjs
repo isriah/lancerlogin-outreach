@@ -54,7 +54,7 @@ test("a FIRST check answers found with FIRST's name and season, not found, or un
     assert.deepEqual(await checkFirstTeam(fakeFirst({ "FRC:99901": answer }), "FRC", "99901"), { status: "found", name: "Test Team Alpha" }, `season ${season}`);
   }
   // Long names are cut to the supported-team limit.
-  assert.equal((await checkFirstTeam(fakeFirst({ "FRC:1": found({ ...alpha, number: "1", name: "T".repeat(200) }) }), "FRC", "1")).name.length, 150);
+  assert.equal((await checkFirstTeam(fakeFirst({ "FRC:99981": found({ ...alpha, number: "99981", name: "T".repeat(200) }) }), "FRC", "99981")).name.length, 150);
   // FIRST is never asked about a number it cannot hold, an unknown program, or without a connection.
   const unused = fakeFirst();
   for (const [program, number] of [["FRC", "TEST-1"], ["FRC", "1234567"], ["FRC", ""], ["VEX", "99901"], ["FRC", 99901]]) assert.deepEqual(await checkFirstTeam(unused, program, number), { status: "unavailable" });
@@ -77,7 +77,7 @@ test("the public team lookup returns only what the form needs", async () => {
   assert.deepEqual(fll.calls, [{ program: "Challenge", number: "99905" }]);
   assert.deepEqual(await lookup(undefined, "program=FRC&number=99901"), { status: 200, body: { status: "unavailable" } }, "a Core without the FIRST connection answers unavailable");
   const refused = fakeFirst();
-  for (const query of ["program=FRC", "number=99901", "program=VEX&number=99901", "program=FRC&number=TEST-1", "program=FRC&number=1234567", "program=FRC&number=1&number=2", "program=FRC&number=1&extra=1"]) {
+  for (const query of ["program=FRC", "number=99901", "program=VEX&number=99901", "program=FRC&number=TEST-1", "program=FRC&number=1234567", "program=FRC&number=99981&number=99902", "program=FRC&number=99981&extra=1"]) {
     await assert.rejects(lookup(refused, query), (error) => error.status === 400, query);
   }
   assert.deepEqual(refused.calls, []);
