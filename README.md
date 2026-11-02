@@ -80,7 +80,7 @@ No repository secrets are needed. Core and every plugin it composes are public; 
 
 To test against a newer Core release, update `core.commit` (the full commit SHA of the release tag) and `core.tag` in `.github/plugin-release.json` in its own pull request.
 
-Run the same gate locally from a clean commit with a Core checkout beside it: `git clone https://github.com/isriah/LancerLogin.git ../LancerLogin`, `git -C ../LancerLogin checkout <core.commit>`, `npm ci` in that checkout, then `npm run verify:core -- ../LancerLogin` (add `--mode fast` for the logic tests only). The plugin's own release-policy tests run with `npm test`. For writing plugins, see `docs/PLUGIN-AUTHORING.md` in isriah/LancerLogin (available from the next Modular release).
+Run the same gate locally from a clean commit with a Core checkout beside it: `git clone https://github.com/isriah/LancerLogin.git ../LancerLogin`, `git -C ../LancerLogin checkout <core.commit>`, `npm ci` in that checkout, then `npm run verify:core -- ../LancerLogin` (add `--mode fast` for the logic tests only). The plugin's own tests run with `npm ci` and then `npm test`; neither needs Core. `.npmrc` sets `legacy-peer-deps` because Core provides the peer dependencies when it composes the plugin, so npm never installs them here. For writing plugins, see `docs/PLUGIN-AUTHORING.md` in isriah/LancerLogin (available from the next Modular release).
 
 ## Releasing
 
