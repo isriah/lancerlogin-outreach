@@ -90,7 +90,7 @@ export function resolveOutreachActivityCsvRow(values: OutreachActivityCsvValues)
   const typeText = (values.type ?? "").trim(); const mode = typeText ? types[typeText.toLowerCase().replace(/[\s_-]+/g, "")] : "event";
   if (!mode) errors.push(`Type must be Event, Team support or Other service, not ${typeText}`);
   const startText = values.startTime?.trim() ?? ""; const endText = values.endTime?.trim() ?? "";
-  let startLocal: string | null | undefined = values.startTime === undefined && values.endTime === undefined ? undefined : null; let endLocal = startLocal;
+  let startLocal: string | null | undefined = values.startTime === undefined && values.endTime === undefined ? undefined : null; let endLocal: string | null | undefined = startLocal;
   if (mode && mode !== "event" && (startText || endText)) errors.push("Only Event activities take a start and end time");
   else if (startText || endText) {
     if (!startText || !endText) errors.push("Add both a start time and an end time, or leave both blank for an all-day Event");
