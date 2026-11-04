@@ -33,7 +33,8 @@ const api = defineApiModule({
         const routed = await publicFormSettingsRoute(context.db, principal.userId, context.request, await context.body());
         return context.respond(routed.body, routed.status);
       }
-      if (path === "/admin/hours/publication-settings") {
+      // Automatic publication switches, their delivery status and Publish upcoming Events are Admin settings.
+      if (path === "/admin/hours/publication-settings" || path === "/admin/hours/publication-destinations" || path === "/admin/hours/publication-destinations/backfill") {
         const principal = await context.requireRole(["admin"]);
         const routed = await outreachPublicationRoute(context.db, outreachPublicationProviders(context.services), principal.userId, context.request, await context.body());
         return context.respond(routed.body, routed.status);

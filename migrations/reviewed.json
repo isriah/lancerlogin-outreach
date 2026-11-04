@@ -2,5 +2,9 @@
   {
     "name": "0001_self_logged_participation.sql",
     "sha256": "4ee3a81d9d24a1a3b7eca2a92bc7723b1e892ed09e582a47e3c7f464916d28c9"
+  },
+  {
+    "name": "0002_publication_destinations.sql",
+    "sha256": "55ee37af28c8450fe4a675a8f8ac046a08a25ad4519f61cc663890f357851405"
   }
 ]

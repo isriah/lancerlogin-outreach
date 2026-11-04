@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { resolveCivilTime, type CivilTimeOccurrence } from "@lancerlogin/module-sdk";
 import { dashboardApi as api } from "@lancerlogin/module-sdk/dashboard";
+import { AppLink, usePath } from "@lancerlogin/module-sdk/dashboard";
+import { backfillButtonText, backfillConfirmText, backfillDestinations, backfillHelp, backfillResultText, deliveryText, integrationsHref, integrationsLinkText, latestProblemText, noBackfillDestinationText, notSetUpText, parsePublicationDestinations, publicationProviderOrder, retryingAtText, switchDisabled, switchLabel, switchNotice, type BackfillPage, type PublicationDestinations, type PublicationProvider } from "./outreach-publication-destinations.ts";
 
 export type OutreachEventSchedule = {
   eventStartLocal: string | null;
@@ -19,10 +21,12 @@ export type OutreachActivityPublication = {
   googleAction?: "publish" | "delete" | null;
   googleError: string | null;
   googleExternalId?: string | null;
+  googleNextAttemptAt?: string | null;
   discordStatus: string | null;
   discordAction?: "publish" | "delete" | null;
   discordError: string | null;
   discordExternalId?: string | null;
+  discordNextAttemptAt?: string | null;
 };
 
 type Notice = { tone: "success" | "error"; text: string };
@@ -44,8 +48,8 @@ export function OutreachEventScheduleFields({ date, timeZone, value, onChange, d
 }
 
 const providerDetails = [
-  { key: "google_calendar", label: "Google Calendar", selected: "googleCalendar", status: "googleStatus", action: "googleAction", error: "googleError", externalId: "googleExternalId" },
-  { key: "discord", label: "Discord", selected: "discord", status: "discordStatus", action: "discordAction", error: "discordError", externalId: "discordExternalId" },
+  { key: "google_calendar", label: "Google Calendar", selected: "googleCalendar", status: "googleStatus", action: "googleAction", error: "googleError", externalId: "googleExternalId", nextAttemptAt: "googleNextAttemptAt" },
+  { key: "discord", label: "Discord", selected: "discord", status: "discordStatus", action: "discordAction", error: "discordError", externalId: "discordExternalId", nextAttemptAt: "discordNextAttemptAt" },
 ] as const;
 
 function statusLabel(configured: boolean, selected: boolean, status: string | null, action: "publish" | "delete" | null | undefined) {
@@ -97,28 +101,66 @@ export function ActivityPublicationControls({ activity, publication, providers, 
     const present = action !== "delete" && (status === "delivered" || Boolean(current?.[provider.externalId]));
     const pending = status === "pending" || status === "processing";
     const error = current?.[provider.error];
+    // A failed delivery with a next attempt retries by itself; one without waits for Retry.
+    const retrying = status === "failed" ? retryingAtText(current?.[provider.nextAttemptAt]) : null;
     return <div className="outreach-publication-destination" key={provider.key}>
-      <button className="ui-button outreach-publication-trigger" data-provider={provider.key} data-published={present} type="button" disabled={saving || pending || Boolean(activity.archived) && !(status === "failed" && action === "delete")} aria-label={`${provider.label}: ${label}`} aria-expanded={menu === provider.key} title={`${provider.label}: ${label}${error ? ` - ${error}` : ""}`} onClick={() => present || status === "failed" ? setMenu(menu === provider.key ? null : provider.key) : void act(provider.key, "publish")}><PublicationIcon provider={provider.key} /><span className="outreach-publication-mark" aria-hidden="true">{status === "failed" ? "!" : pending ? "◷" : present ? "✓" : "+"}</span></button>
-      {menu === provider.key && <div className="ui-card outreach-publication-menu" role="group" aria-label={`${provider.label} publication actions`}><strong>{provider.label}</strong><span>{label}</span>{error && <p className="field-help">{error}</p>}{status === "failed" && <button className="ui-button" type="button" disabled={saving} onClick={() => void act(provider.key, "retry")}>Retry {provider.label}</button>}{!activity.archived && <><button className="ui-button" type="button" disabled={saving} onClick={() => void act(provider.key, "publish")}>Update {provider.label}</button>{present && <button className="ui-button ui-button--danger" type="button" disabled={saving} onClick={() => void act(provider.key, "delete")}>Unpublish {provider.label}</button>}</>}</div>}
+      <button className="ui-button outreach-publication-trigger" data-provider={provider.key} data-published={present} type="button" disabled={saving || pending || Boolean(activity.archived) && !(status === "failed" && action === "delete")} aria-label={`${provider.label}: ${label}`} aria-expanded={menu === provider.key} title={`${provider.label}: ${label}${error ? ` - ${error}` : ""}${retrying ? ` ${retrying}.` : ""}`} onClick={() => present || status === "failed" ? setMenu(menu === provider.key ? null : provider.key) : void act(provider.key, "publish")}><PublicationIcon provider={provider.key} /><span className="outreach-publication-mark" aria-hidden="true">{status === "failed" ? "!" : pending ? "◷" : present ? "✓" : "+"}</span></button>
+      {menu === provider.key && <div className="ui-card outreach-publication-menu" role="group" aria-label={`${provider.label} publication actions`}><strong>{provider.label}</strong><span>{label}</span>{error && <p className="field-help">{error}</p>}{retrying && <p className="field-help">{retrying}</p>}{status === "failed" && <button className="ui-button" type="button" disabled={saving} onClick={() => void act(provider.key, "retry")}>Retry {provider.label}</button>}{!activity.archived && <><button className="ui-button" type="button" disabled={saving} onClick={() => void act(provider.key, "publish")}>Update {provider.label}</button>{present && <button className="ui-button ui-button--danger" type="button" disabled={saving} onClick={() => void act(provider.key, "delete")}>Unpublish {provider.label}</button>}</>}</div>}
     </div>;
   })}</div>;
 }
 
+/**
+ * One automatic switch per destination, its delivery status, and Publish upcoming Events. Turning a switch on offers to
+ * publish the upcoming Events once; nothing is published until the Admin confirms.
+ */
 export function OutreachAutomaticPublicationSetting() {
-  const [setting, setSetting] = useState<{ automatic: boolean; revision: number }>();
-  const [providers, setProviders] = useState<OutreachPublicationProviders>();
-  const [busy, setBusy] = useState(true);
+  const { navigate } = usePath();
+  const [status, setStatus] = useState<PublicationDestinations>();
+  const [busy, setBusy] = useState(true); const [unavailable, setUnavailable] = useState(false);
+  // The confirmation for Publish upcoming Events, opened by its button or once when a switch is turned on.
+  const [offer, setOffer] = useState(false);
   const [notice, setNotice] = useState<Notice>();
-  useEffect(() => { void Promise.all([api<{ automatic: boolean; revision: number }>("/admin/hours/publication-settings"), api<OutreachPublicationProviders>("/admin/hours/publication-providers")]).then(([nextSetting, nextProviders]) => { setSetting(nextSetting); setProviders(nextProviders); }).catch((error) => setNotice({ tone: "error", text: (error as Error).message })).finally(() => setBusy(false)); }, []);
-  async function change(automatic: boolean) {
-    if (!setting) return;
-    setBusy(true); setNotice(undefined);
+  async function load() { const next = parsePublicationDestinations(await api<unknown>("/admin/hours/publication-destinations")); setStatus(next); setUnavailable(!next); return next; }
+  useEffect(() => { void load().catch((error) => setNotice({ tone: "error", text: (error as Error).message })).finally(() => setBusy(false)); }, []);
+  async function change(provider: PublicationProvider, automatic: boolean) {
+    if (!status) return;
+    setBusy(true); setNotice(undefined); setOffer(false);
     try {
-      const next = await api<{ automatic: boolean; revision: number }>("/admin/hours/publication-settings", { method: "PATCH", body: JSON.stringify({ automatic, revision: setting.revision }) });
-      setSetting(next); setNotice({ tone: "success", text: automatic ? "Automatic Event publication is on." : "Automatic Event publication is off." });
+      const next = parsePublicationDestinations(await api<unknown>("/admin/hours/publication-destinations", { method: "PATCH", body: JSON.stringify({ provider, automatic, revision: status.revision }) }));
+      if (next) setStatus(next); else await load();
+      setNotice({ tone: "success", text: switchNotice(provider, automatic) });
+      if (automatic) setOffer(true);
     } catch (error) { setNotice({ tone: "error", text: (error as Error).message }); }
     finally { setBusy(false); }
   }
-  const destinations = providers ? [providers.google_calendar ? "Google Calendar" : "", providers.discord ? "Discord" : ""].filter(Boolean) : [];
-  return <article className="ui-card outreach-stack" aria-labelledby="automatic-outreach-publication-title"><div><h2 id="automatic-outreach-publication-title">Automatic activity publication</h2><p>Off by default. When on, saving a future Event queues every configured destination. Team Support and Other Service activities are never published.</p></div>{setting && <label className="settings-checkbox"><input className="ui-checkbox" type="checkbox" role="switch" checked={setting.automatic} disabled={busy} onChange={(event) => void change(event.target.checked)} /> Automatically publish Events</label>}<p className="field-help">Configured destinations: {destinations.length ? destinations.join(" and ") : "None. Configure Google Calendar or Discord in Integrations."}</p>{busy && !setting && <p className="ui-status" role="status">Loading publication settings...</p>}{notice && <p className="ui-status" data-tone={notice.tone} role={notice.tone === "error" ? "alert" : "status"}>{notice.text}</p>}</article>;
+  async function publishUpcoming() {
+    setBusy(true); setNotice(undefined); setOffer(false);
+    try {
+      // Pages of 10 like Core's Discord calendar sync-all; the server ends the run at its limit of 100 Events.
+      const total = { selected: 0, queued: 0, skipped: 0, failed: 0 }; let cursor: string | null = null;
+      do {
+        const page: BackfillPage = await api<BackfillPage>(`/admin/hours/publication-destinations/backfill${cursor ? `?after=${encodeURIComponent(cursor)}` : ""}`, { method: "POST", body: "{}" });
+        total.selected += page.selected; total.queued += page.queued; total.skipped += page.skipped; total.failed += page.failed;
+        cursor = total.selected < page.limit ? page.nextCursor : null;
+      } while (cursor);
+      await load(); setNotice({ tone: total.failed ? "error" : "success", text: backfillResultText(total) });
+    } catch (error) { setNotice({ tone: "error", text: (error as Error).message }); }
+    finally { setBusy(false); }
+  }
+  const ready = status ? backfillDestinations(status) : [];
+  return <article className="ui-card outreach-stack" aria-labelledby="automatic-outreach-publication-title"><div><h2 id="automatic-outreach-publication-title">Automatic activity publication</h2><p>Off by default. Turn on a destination to queue each future Event there when it is saved. An Event already published to a destination is updated there whenever it is edited, even with that switch off, and removed when it is archived or changed to another type. Team Support and Other Service activities are never published.</p></div>
+    {status && publicationProviderOrder.map((provider) => {
+      const destination = status.destinations.find((item) => item.provider === provider); if (!destination) return null;
+      const helpId = `automatic-outreach-publication-${provider}`;
+      return <div className="outreach-stack outreach-publication-destination-setting" key={provider} data-provider={provider}>
+        <label className="settings-checkbox"><input className="ui-checkbox" type="checkbox" role="switch" checked={destination.automatic} disabled={switchDisabled(destination, busy)} aria-describedby={helpId} onChange={(event) => void change(provider, event.target.checked)} /> {switchLabel(provider)}</label>
+        <div id={helpId} className="field-help">{!destination.configured ? <p>{notSetUpText} <AppLink href={integrationsHref} navigate={navigate}>{integrationsLinkText}</AppLink>.</p> : <><p>{deliveryText(destination)}</p>{destination.latestProblem && <p>{latestProblemText(destination.latestProblem)}</p>}</>}</div>
+      </div>;
+    })}
+    {offer && ready.length > 0 && <div className="outreach-stack outreach-publication-offer" role="group" aria-label={backfillButtonText}><p>{backfillConfirmText(ready)}</p><div className="module-actions"><button className="ui-button ui-button--primary" type="button" disabled={busy} onClick={() => void publishUpcoming()}>{backfillButtonText}</button><button className="ui-button" type="button" disabled={busy} onClick={() => setOffer(false)}>Not now</button></div></div>}
+    {status && !(offer && ready.length) && <div className="outreach-stack"><div className="module-actions"><button className="ui-button" type="button" disabled={busy || !ready.length} onClick={() => setOffer(true)}>{backfillButtonText}</button></div><p className="field-help">{ready.length ? backfillHelp : noBackfillDestinationText}</p></div>}
+    {busy && !status && <p className="ui-status" role="status">Loading publication settings...</p>}
+    {unavailable && <p className="ui-status" role="status">Publication settings are unavailable. Reload to try again.</p>}
+    {notice && <p className="ui-status" data-tone={notice.tone} role={notice.tone === "error" ? "alert" : "status"}>{notice.text}</p>}</article>;
 }
