@@ -150,6 +150,50 @@ async function detail(db: D1Database, kind: CatalogKind, id: string): Promise<Ro
 /** Supported teams report whether a member added them from the public form and Staff have not yet reviewed them. */
 function withTeamSource(item: Row) { return { ...item, addedByMember: Boolean(item.addedByMember) }; }
 
+function activityMode(value: unknown) {
+  const mode = text(value, 10, true) as keyof typeof categoryByMode;
+  if (!(mode in categoryByMode)) throw new HttpError(400, "Invalid activity mode");
+  return mode;
+}
+
+/**
+ * The stored columns of an activity save, checked as every save checks them: `next` is the stored activity (serialized)
+ * with the request's fields over it, and `input` the request's own fields. Labels, the supported team, the category and the
+ * Event schedule's time zone are checked against the database by the caller. The CSV import uses this too.
+ */
+export function outreachActivityColumns(next: Row, input: Row, existing: Row | null): Row {
+  const mode = activityMode(next.mode); const row: Row = {};
+  row.category_id = categoryByMode[mode]; row.mode = mode;
+  row.team_id = next.teamId == null ? null : text(next.teamId, 128, true);
+  if ((row.mode === "team") !== Boolean(row.team_id)) throw new HttpError(400, "Team support requires a supported team; other activities do not take one");
+  row.service_date = serviceDate(next.serviceDate);
+  row.title = text(next.title, 150, true);
+  row.description = text(next.description ?? "", 4000); row.location = text(next.location ?? "", 300); row.impact_relevant = flag(next.impactRelevant ?? true);
+  const suppliedSchedule = [input.eventStartLocal, input.eventEndLocal, input.eventStartOccurrence, input.eventEndOccurrence].some((value) => value != null && value !== "");
+  if (row.mode !== "event" && suppliedSchedule) throw new HttpError(400, "Only Event activities take a publication schedule");
+  row.event_start_local = row.mode === "event" ? optionalTime(next.eventStartLocal) : null;
+  row.event_end_local = row.mode === "event" ? optionalTime(next.eventEndLocal) : null;
+  row.event_start_occurrence = row.mode === "event" ? optionalOccurrence(next.eventStartOccurrence) : null;
+  row.event_end_occurrence = row.mode === "event" ? optionalOccurrence(next.eventEndOccurrence) : null;
+  row.source_meeting_id = existing?.source_meeting_id ?? null;
+  row.source_snapshot = existing?.source_snapshot ?? null;
+  return row;
+}
+
+/** The write's own check that the activity's category is active and its supported team is too, unless an edit keeps its team. */
+export function outreachActivityGuard(id: string | undefined, row: Row, existing: Row | null) {
+  return { sql: ` AND EXISTS(SELECT 1 FROM hours_categories WHERE installation_id=? AND id=? AND archived=0) AND (? IS NULL OR EXISTS(SELECT 1 FROM hours_teams WHERE installation_id=? AND id=? ${id && row.team_id === existing?.team_id ? "" : "AND archived=0"}))`,
+    values: [installationId, row.category_id, row.team_id, installationId, row.team_id] as unknown[] };
+}
+
+/** The INSERT of a new catalog record, or the UPDATE of an existing one at its expected revision, which also moves its revision on. */
+export function catalogWriteStatement(db: D1Database, table: string, id: string | undefined, target: string, row: Row, expected: number, now: string, additional = "", additionalValues: unknown[] = []) {
+  const columns = Object.keys(row); const values = Object.values(row);
+  return id ? db.prepare(`UPDATE ${table} SET ${columns.map((column) => `${column}=?`).join(",")},revision=revision+1,updated_at=? WHERE installation_id=? AND id=? AND revision=?${additional}`)
+    .bind(...values, now, installationId, id, expected, ...additionalValues) : db.prepare(`INSERT INTO ${table}(installation_id,id,${columns.join(",")},revision,created_at,updated_at) SELECT ?,?,${columns.map(() => "?").join(",")},0,?,? WHERE 1=1${additional}`)
+    .bind(installationId, target, ...values, now, now, ...additionalValues);
+}
+
 async function write(db: D1Database, actor: string, kind: CatalogKind, id: string | undefined, input: unknown, publicationProviders?: OutreachPublicationProviders, nowMs = Date.now()): Promise<RouteResult> {
   if (!object(input)) throw new HttpError(400, "Provide an Outreach record");
   const table = tables[kind]; const existing = id ? await db.prepare(`SELECT * FROM ${table} WHERE installation_id=? AND id=?`).bind(installationId, id).first<Row>() : null;
@@ -173,8 +217,7 @@ async function write(db: D1Database, actor: string, kind: CatalogKind, id: strin
       row.added_by_member = 0;
     }
   } else {
-    const mode = text(next.mode, 10, true) as keyof typeof categoryByMode;
-    if (!(mode in categoryByMode)) throw new HttpError(400, "Invalid activity mode");
+    const mode = activityMode(next.mode);
     const selectedLabelIds = labelIds(id && !("labelIds" in input) ? [] : next.labelIds ?? []);
     if (selectedLabelIds.length) {
       const placeholders = selectedLabelIds.map(() => "?").join(",");
@@ -182,20 +225,7 @@ async function write(db: D1Database, actor: string, kind: CatalogKind, id: strin
       const currentIds = id ? new Set((await db.prepare("SELECT label_id AS id FROM hours_activity_labels WHERE installation_id=? AND activity_id=?").bind(installationId, id).all<Row>()).results?.map((item) => String(item.id)) ?? []) : new Set<string>();
       if ((found.results ?? []).length !== selectedLabelIds.length || (found.results ?? []).some((item) => item.archived && !currentIds.has(String(item.id)))) throw new HttpError(400, "Select active Outreach labels");
     }
-    row.category_id = categoryByMode[mode]; row.mode = mode;
-    row.team_id = next.teamId == null ? null : text(next.teamId, 128, true);
-    if ((row.mode === "team") !== Boolean(row.team_id)) throw new HttpError(400, "Team support requires a supported team; other activities do not take one");
-    row.service_date = serviceDate(next.serviceDate);
-    row.title = text(next.title, 150, true);
-    row.description = text(next.description ?? "", 4000); row.location = text(next.location ?? "", 300); row.impact_relevant = flag(next.impactRelevant ?? true);
-    const suppliedSchedule = [input.eventStartLocal, input.eventEndLocal, input.eventStartOccurrence, input.eventEndOccurrence].some((value) => value != null && value !== "");
-    if (row.mode !== "event" && suppliedSchedule) throw new HttpError(400, "Only Event activities take a publication schedule");
-    row.event_start_local = row.mode === "event" ? optionalTime(next.eventStartLocal) : null;
-    row.event_end_local = row.mode === "event" ? optionalTime(next.eventEndLocal) : null;
-    row.event_start_occurrence = row.mode === "event" ? optionalOccurrence(next.eventStartOccurrence) : null;
-    row.event_end_occurrence = row.mode === "event" ? optionalOccurrence(next.eventEndOccurrence) : null;
-    row.source_meeting_id = existing?.source_meeting_id ?? null;
-    row.source_snapshot = existing?.source_snapshot ?? null;
+    Object.assign(row, outreachActivityColumns(next, input, existing));
     if (row.mode === "event") {
       const timing = await validateOutreachEventSchedule(db, row, nowMs, false, false);
       // Saving queues the destinations whose switch is on, and updates the Event wherever it is already published.
@@ -210,14 +240,11 @@ async function write(db: D1Database, actor: string, kind: CatalogKind, id: strin
         } else publicationQueue = { automatic: true, queuedProviders: [], revision: null, reason: "not_eligible" };
       }
     }
-    additional = ` AND EXISTS(SELECT 1 FROM hours_categories WHERE installation_id=? AND id=? AND archived=0) AND (? IS NULL OR EXISTS(SELECT 1 FROM hours_teams WHERE installation_id=? AND id=? ${id && row.team_id === existing?.team_id ? "" : "AND archived=0"}))`;
-    additionalValues = [installationId, row.category_id, row.team_id, installationId, row.team_id];
+    ({ sql: additional, values: additionalValues } = outreachActivityGuard(id, row, existing));
     if (id && (mode !== existing?.mode || Boolean(row.archived) && !Boolean(existing?.archived))) additional += " AND NOT EXISTS(SELECT 1 FROM hours_publication_operations WHERE installation_id=hours_activities.installation_id AND activity_id=hours_activities.id AND status='processing')";
   }
-  const columns = Object.keys(row); const values = Object.values(row); const auditId = crypto.randomUUID();
-  const statement = id ? db.prepare(`UPDATE ${table} SET ${columns.map((column) => `${column}=?`).join(",")},revision=revision+1,updated_at=? WHERE installation_id=? AND id=? AND revision=?${additional}`)
-    .bind(...values, now, installationId, id, expected, ...additionalValues) : db.prepare(`INSERT INTO ${table}(installation_id,id,${columns.join(",")},revision,created_at,updated_at) SELECT ?,?,${columns.map(() => "?").join(",")},0,?,? WHERE 1=1${additional}`)
-    .bind(installationId, target, ...values, now, now, ...additionalValues);
+  const auditId = crypto.randomUUID();
+  const statement = catalogWriteStatement(db, table, id, target, row, expected, now, additional, additionalValues);
   let results;
   try {
     const changesLabels = kind === "activities" && (!id || "labelIds" in input);

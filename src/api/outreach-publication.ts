@@ -139,6 +139,64 @@ export function parseOutreachPublicationEvent(value: unknown): OutreachPublicati
   return value as OutreachPublicationEvent;
 }
 
+/** The event a publication revision delivers: the activity's text and its scheduled interval in the installation time zone. */
+export function outreachPublicationSnapshot(activityId: string, revision: number, activity: Row, timeZone: string, timing: { startMs: unknown; endMs: unknown; allDay: boolean }): OutreachPublicationEvent {
+  return { activityId, revision, title: String(activity.title), description: String(activity.description ?? ""), location: String(activity.location ?? ""),
+    startsAt: new Date(Number(timing.startMs)).toISOString(), endsAt: new Date(Number(timing.endMs)).toISOString(), timeZone, allDay: timing.allDay, serviceDate: String(activity.service_date) };
+}
+
+/** A destination the new revision does not deliver to keeps its delivery, with the snapshot of the revision it delivered. */
+function carriedSnapshot(row: Row, event: OutreachPublicationEvent, existing: Row) {
+  return row.event_snapshot_json ?? (row.action === "publish" ? JSON.stringify({ ...event, revision: Number(existing.revision), startsAt: new Date(Number(existing.start_ms)).toISOString(), endsAt: new Date(Number(existing.end_ms)).toISOString(), timeZone: String(existing.time_zone), allDay: false }) : null);
+}
+
+/** Destinations an Event's current publication has delivered to, from that Event's publication operations (all revisions). */
+export function outreachPublishedProviders(existing: Row | null, operations: Row[]) {
+  return new Set(operations.filter((row) => existing && Number(row.publication_revision) === Number(existing.revision) && row.action === "publish" && row.external_id != null).map((row) => row.provider as OutreachPublicationProvider));
+}
+
+/** The newest provider event identity for each destination, as latestExternalIds reads it. */
+export function outreachLatestExternalIds(operations: Row[]) {
+  const found = new Map<OutreachPublicationProvider, string>();
+  for (const row of [...operations].filter((item) => item.action === "publish" && item.external_id != null).sort((left, right) => Number(right.publication_revision) - Number(left.publication_revision))) if (!found.has(row.provider as OutreachPublicationProvider)) found.set(row.provider as OutreachPublicationProvider, String(row.external_id));
+  return found;
+}
+
+/** One Event's next publication, worked out as queuePublication does, for a caller that queues many Events in one batch. */
+export type OutreachPublicationQueueItem = { activityId: string; activityRevision: number; activity: Row; timeZone: string; timing: { startLocal: unknown; endLocal: unknown; startOccurrence: unknown; endOccurrence: unknown; startMs: number; endMs: number; allDay: boolean }; existing: Row | null; previous: Row[]; externalIds: Map<OutreachPublicationProvider, string>; selected: OutreachPublicationProvider[] };
+
+/**
+ * queuePublication's writes for many Events at once, as three statements over JSON arrays, so a CSV import of up to 200
+ * Events stays one D1 batch within the Workers Free plan: the publication row (created, or moved to its next revision), a
+ * pending delivery to each selected destination with its newest event identity, and the other destinations' deliveries
+ * carried to the new revision. Each publication changes only if its activity is still the active Event at the given
+ * revision and its publication is still at the revision read; the caller checks `revisions` before its batch commits.
+ * The caller makes sure no delivery is in progress for these Events, as queuePublication refuses one.
+ */
+export function outreachPublicationQueueStatements(db: D1Database, actor: string, items: OutreachPublicationQueueItem[], now: number) {
+  const nowText = new Date(now).toISOString(); const publications: Row[] = []; const pending: Row[] = []; const carried: Row[] = [];
+  for (const item of items) {
+    const revision = item.existing ? Number(item.existing.revision) + 1 : 0; const event = outreachPublicationSnapshot(item.activityId, revision, item.activity, item.timeZone, item.timing);
+    publications.push({ activityId: item.activityId, activityRevision: item.activityRevision, revision, timeZone: item.timeZone, startLocal: item.timing.startLocal, endLocal: item.timing.endLocal, startOccurrence: item.timing.startOccurrence, endOccurrence: item.timing.endOccurrence, startMs: item.timing.startMs, endMs: item.timing.endMs,
+      googleCalendar: Number(item.selected.includes("google_calendar") || Boolean(item.existing?.google_calendar)), discord: Number(item.selected.includes("discord") || Boolean(item.existing?.discord)) });
+    for (const provider of item.selected) pending.push({ activityId: item.activityId, revision, provider, externalId: item.externalIds.get(provider) ?? null, snapshot: JSON.stringify(event) });
+    for (const row of item.previous.filter((operation) => !item.selected.includes(operation.provider as OutreachPublicationProvider))) carried.push({ activityId: item.activityId, revision, provider: row.provider, status: row.status, attempts: row.attempts, nextAttemptAt: row.next_attempt_at, externalId: row.external_id, lastError: row.last_error, createdAt: row.created_at, updatedAt: row.updated_at, action: row.action, snapshot: carriedSnapshot(row, event, item.existing!) });
+  }
+  const statements: D1Statement[] = [];
+  if (!publications.length) return { statements, revisions: [] as { activityId: string; revision: number }[] };
+  const field = (name: string) => `json_extract(value,'$.${name}')`;
+  statements.push(db.prepare(`INSERT INTO hours_activity_publications(installation_id,activity_id,time_zone,start_local,end_local,start_occurrence,end_occurrence,start_ms,end_ms,google_calendar,discord,status,revision,actor_user_id,reviewed_by_user_id,reviewed_at,created_at,updated_at)
+    SELECT ?,${field("activityId")},${field("timeZone")},${field("startLocal")},${field("endLocal")},${field("startOccurrence")},${field("endOccurrence")},${field("startMs")},${field("endMs")},${field("googleCalendar")},${field("discord")},'approved',${field("revision")},?,?,?,?,? FROM json_each(?)
+    WHERE EXISTS(SELECT 1 FROM hours_activities a WHERE a.installation_id=? AND a.id=${field("activityId")} AND a.revision=${field("activityRevision")} AND a.mode='event' AND a.archived=0)
+    ON CONFLICT(installation_id,activity_id) DO UPDATE SET time_zone=excluded.time_zone,start_local=excluded.start_local,end_local=excluded.end_local,start_occurrence=excluded.start_occurrence,end_occurrence=excluded.end_occurrence,start_ms=excluded.start_ms,end_ms=excluded.end_ms,google_calendar=excluded.google_calendar,discord=excluded.discord,status='approved',revision=excluded.revision,reviewed_by_user_id=excluded.reviewed_by_user_id,reviewed_at=excluded.reviewed_at,updated_at=excluded.updated_at
+    WHERE hours_activity_publications.revision=excluded.revision-1`).bind(installationId, actor, actor, nowText, nowText, nowText, JSON.stringify(publications), installationId));
+  if (pending.length) statements.push(db.prepare(`INSERT INTO hours_publication_operations(installation_id,activity_id,publication_revision,provider,status,attempts,next_attempt_at,external_id,created_at,updated_at,action,event_snapshot_json)
+    SELECT ?,${field("activityId")},${field("revision")},${field("provider")},'pending',0,?,${field("externalId")},?,?,'publish',${field("snapshot")} FROM json_each(?)`).bind(installationId, nowText, nowText, nowText, JSON.stringify(pending)));
+  if (carried.length) statements.push(db.prepare(`INSERT INTO hours_publication_operations(installation_id,activity_id,publication_revision,provider,status,attempts,next_attempt_at,external_id,last_error,created_at,updated_at,action,event_snapshot_json)
+    SELECT ?,${field("activityId")},${field("revision")},${field("provider")},${field("status")},${field("attempts")},${field("nextAttemptAt")},${field("externalId")},${field("lastError")},${field("createdAt")},${field("updatedAt")},${field("action")},${field("snapshot")} FROM json_each(?)`).bind(installationId, JSON.stringify(carried)));
+  return { statements, revisions: publications.map((item) => ({ activityId: String(item.activityId), revision: Number(item.revision) })) };
+}
+
 async function queuePublication(db: D1Database, providers: OutreachPublicationProviders, actor: string, activityId: string,
   options: { automatic: boolean; backfill?: boolean; preloaded?: { activity: Row; available: Record<OutreachPublicationProvider, boolean> }; expectedActivityRevision: number; expectedPublicationRevision?: number | null; providers?: OutreachPublicationProvider[]; remove?: boolean }, now: number): Promise<OutreachPublicationQueueResult> {
   const wanted = options.automatic ? await outreachAutomaticDestinations(db, activityId) : undefined;
@@ -160,8 +218,7 @@ async function queuePublication(db: D1Database, providers: OutreachPublicationPr
   if (options.remove && (!existing || selected.length !== 1 || !externalIds.has(selected[0]!))) throw new HttpError(409, "This destination has no published event to remove");
   const timing = options.remove ? { startLocal: existing!.start_local, endLocal: existing!.end_local, startOccurrence: existing!.start_occurrence, endOccurrence: existing!.end_occurrence, startMs: existing!.start_ms, endMs: existing!.end_ms, allDay: false } : publicationTiming(activity, String(activity.time_zone), now, options.automatic || Boolean(options.backfill) || selected.includes("discord"));
   const revision = existing ? Number(existing.revision) + 1 : 0; const nowText = new Date(now).toISOString(); const auditId = crypto.randomUUID();
-  const event: OutreachPublicationEvent = { activityId, revision, title: String(activity.title), description: String(activity.description ?? ""), location: String(activity.location ?? ""),
-    startsAt: new Date(Number(timing.startMs)).toISOString(), endsAt: new Date(Number(timing.endMs)).toISOString(), timeZone: String(activity.time_zone), allDay: timing.allDay, serviceDate: String(activity.service_date) };
+  const event = outreachPublicationSnapshot(activityId, revision, activity, String(activity.time_zone), timing);
   const googleCalendar = Number(selected.includes("google_calendar") || Boolean(existing?.google_calendar)); const discord = Number(selected.includes("discord") || Boolean(existing?.discord));
   const deliveryGuard = "NOT EXISTS(SELECT 1 FROM hours_publication_operations WHERE installation_id=? AND activity_id=? AND status='processing' AND publication_revision=?) AND EXISTS(SELECT 1 FROM hours_activities WHERE installation_id=? AND id=? AND revision=? AND mode='event' AND archived=0)";
   const guardValues = [installationId, activityId, existing?.revision ?? -1, installationId, activityId, options.expectedActivityRevision];
@@ -171,7 +228,7 @@ async function queuePublication(db: D1Database, providers: OutreachPublicationPr
   const statements: D1Statement[] = [mutation,
     db.prepare("INSERT INTO audit_log(id,installation_id,actor_user_id,action,target_type,target_id,metadata_json,created_at) SELECT ?,?,?,?,'outreach_activity',?,?,? WHERE changes()=1").bind(auditId, installationId, actor, options.remove ? "outreach.publication_cleanup_queued" : "outreach.publication_queued", activityId, JSON.stringify({ automatic: options.automatic, ...(options.backfill ? { backfill: true } : {}), providers: selected, revision }), nowText),
     ...selected.map(provider => db.prepare(`INSERT INTO hours_publication_operations(installation_id,activity_id,publication_revision,provider,status,attempts,next_attempt_at,external_id,created_at,updated_at,action,event_snapshot_json) SELECT ?,?,?,?,'pending',0,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM audit_log WHERE id=?)`).bind(installationId, activityId, revision, provider, nowText, externalIds.get(provider) ?? null, nowText, nowText, options.remove ? "delete" : "publish", options.remove ? null : JSON.stringify(event), auditId)),
-    ...previous.filter(row => !selected.includes(row.provider as OutreachPublicationProvider)).map(row => db.prepare(`INSERT INTO hours_publication_operations(installation_id,activity_id,publication_revision,provider,status,attempts,next_attempt_at,external_id,last_error,created_at,updated_at,action,event_snapshot_json) SELECT ?,?,?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM audit_log WHERE id=?)`).bind(installationId, activityId, revision, row.provider, row.status, row.attempts, row.next_attempt_at, row.external_id, row.last_error, row.created_at, row.updated_at, row.action, row.event_snapshot_json ?? (row.action === "publish" ? JSON.stringify({ ...event, revision: Number(existing!.revision), startsAt: new Date(Number(existing!.start_ms)).toISOString(), endsAt: new Date(Number(existing!.end_ms)).toISOString(), timeZone: String(existing!.time_zone), allDay: false }) : null), auditId)),
+    ...previous.filter(row => !selected.includes(row.provider as OutreachPublicationProvider)).map(row => db.prepare(`INSERT INTO hours_publication_operations(installation_id,activity_id,publication_revision,provider,status,attempts,next_attempt_at,external_id,last_error,created_at,updated_at,action,event_snapshot_json) SELECT ?,?,?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM audit_log WHERE id=?)`).bind(installationId, activityId, revision, row.provider, row.status, row.attempts, row.next_attempt_at, row.external_id, row.last_error, row.created_at, row.updated_at, row.action, carriedSnapshot(row, event, existing!), auditId)),
   ];
   const results = await db.batch(statements); if (results.some(result => result.meta?.changes !== 1)) throw new HttpError(409, "Publication status changed; reload before publishing again");
   return { automatic: options.automatic, queuedProviders: selected, revision };
