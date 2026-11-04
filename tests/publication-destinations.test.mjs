@@ -133,7 +133,7 @@ test("an Event published to a destination stays in sync there with that switch o
   assert.deepEqual(operations(db, second.id).map((row) => [row.provider, row.action, row.status]), [["discord", "delete", "pending"]]);
 });
 
-test("Publish upcoming Events pages 10 at a time, skips what is published or over, and needs a switch on", async () => {
+test("Publish upcoming Events pages 5 at a time, skips what is published or over, and needs a switch on", async () => {
   const db = outreachDatabase(); const providers = stubProviders();
   await assert.rejects(publication(db, providers, "POST", "/admin/hours/publication-destinations/backfill"), /Turn on automatic publication/);
   const ids = [];
@@ -148,20 +148,21 @@ test("Publish upcoming Events pages 10 at a time, skips what is published or ove
   await setDestination(db, providers, "discord", true);
   const pages = []; let cursor = null;
   do { const page = (await publication(db, providers, "POST", `/admin/hours/publication-destinations/backfill${cursor ? `?after=${encodeURIComponent(cursor)}` : ""}`, {})).body; pages.push(page); cursor = page.nextCursor; } while (cursor);
-  assert.deepEqual(pages.map((page) => [page.selected, page.failed, page.limit, page.batchLimit]), [[10, 0, 100, 10], [10, 0, 100, 10], [6, 0, 100, 10]]);
+  assert.deepEqual(pages.map((page) => [page.selected, page.failed, page.limit, page.batchLimit]), [[5, 0, 100, 5], [5, 0, 100, 5], [5, 0, 100, 5], [5, 0, 100, 5], [5, 0, 100, 5], [1, 0, 100, 5]]);
   // 26 upcoming Events: 24 queued, and the one already published and the one that ended this morning skipped.
   assert.equal(pages.reduce((total, page) => total + page.queued, 0), 24); assert.equal(pages.reduce((total, page) => total + page.skipped, 0), 2);
-  assert.deepEqual(pages.map((page) => page.providers), [["discord"], ["discord"], ["discord"]]);
+  assert.ok(pages.every((page) => page.providers.length === 1 && page.providers[0] === "discord"));
   assert.deepEqual(operations(db, ended.id), []);
   assert.deepEqual(operations(db, ids[1]).map((row) => [row.provider, row.action, row.status]), [["discord", "publish", "pending"]]);
   // A second run finds every Event waiting or published, and turning Google Calendar on adds only Google Calendar.
   const again = (await publication(db, providers, "POST", "/admin/hours/publication-destinations/backfill", {})).body;
-  assert.deepEqual([again.queued, again.skipped], [0, 10]);
+  assert.deepEqual([again.queued, again.skipped], [0, 5]);
   await setDestination(db, providers, "google_calendar", true);
   const google = (await publication(db, providers, "POST", "/admin/hours/publication-destinations/backfill", {})).body;
-  assert.deepEqual(google.providers, ["google_calendar", "discord"]); assert.deepEqual([google.queued, google.skipped], [9, 1], "the first page holds the Event that ended this morning");
-  assert.deepEqual(operations(db, ids[1]).map((row) => [row.provider, row.status]), [["discord", "pending"], ["google_calendar", "pending"]]);
-  assert.equal(db.raw.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action='outreach.publication_backfill_requested'").get().n, 5);
+  assert.deepEqual(google.providers, ["google_calendar", "discord"]); assert.deepEqual([google.queued, google.skipped], [4, 1], "the first page holds the Event that ended this morning");
+  // The Event published to Discord by hand is in the first page: Discord stays as it is and Google Calendar is added.
+  assert.deepEqual(operations(db, ids[0]).map((row) => [row.provider, row.status]), [["discord", "delivered"], ["google_calendar", "pending"]]);
+  assert.equal(db.raw.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action='outreach.publication_backfill_requested'").get().n, 8);
   // Bad requests are refused.
   await assert.rejects(publication(db, providers, "POST", "/admin/hours/publication-destinations/backfill?after=not-a-cursor", {}), /cursor is invalid/);
   await assert.rejects(publication(db, providers, "POST", `/admin/hours/publication-destinations/backfill?after=${btoa(JSON.stringify(["2026-11-01", "x", 101]))}`, {}), /cursor is invalid/);
@@ -174,7 +175,7 @@ test("Publish upcoming Events stops at 100 Events in one run", async () => {
   await setDestination(db, providers, "discord", true);
   const pages = []; let cursor = null;
   do { const page = (await publication(db, providers, "POST", `/admin/hours/publication-destinations/backfill${cursor ? `?after=${encodeURIComponent(cursor)}` : ""}`, {})).body; pages.push(page); cursor = page.nextCursor; } while (cursor);
-  assert.equal(pages.length, 10); assert.ok(pages.every((page) => page.selected === 10));
+  assert.equal(pages.length, 20); assert.ok(pages.every((page) => page.selected === 5));
   assert.equal(pages.at(-1).nextCursor, null, "the server ends the run at its limit");
   assert.equal(db.raw.prepare("SELECT COUNT(*) AS n FROM hours_publication_operations").get().n, 100);
   // A later run picks up the rest.
@@ -194,11 +195,11 @@ test("a Discord permission error stops Discord's deliveries in that run and wait
   const denied = Object.assign(new Error("Discord denied this request because the bot is missing a required permission. Confirm it is in the selected server and has the Create Events permission."), { status: 502 });
   let discordCalls = 0;
   const providers = stubProviders({ fail: (provider) => provider === "discord" ? (discordCalls++, outreachDiscordDeliveryError(denied, undefined)) : undefined });
-  await queuedEvents(db, providers, 4);
-  assert.deepEqual(await processOutreachPublicationOperations(db, providers, now + 1_000), { delivered: 4, failed: 1, pending: 3 });
-  assert.equal(discordCalls, 1, "Discord got one request, not four");
+  await queuedEvents(db, providers, 2);
+  assert.deepEqual(await processOutreachPublicationOperations(db, providers, now + 1_000), { delivered: 2, failed: 1, pending: 1 });
+  assert.equal(discordCalls, 1, "Discord got one request, not two");
   const discord = statuses(db, "discord");
-  assert.deepEqual(discord.map((row) => row.status).sort(), ["failed", "pending", "pending", "pending"]);
+  assert.deepEqual(discord.map((row) => row.status).sort(), ["failed", "pending"]);
   const failure = discord.find((row) => row.status === "failed");
   assert.equal(failure.nextAttemptAt, null, "a missing permission waits for Retry, as meetings do"); assert.equal(failure.attempts, 1); assert.match(failure.lastError, /Create Events permission/);
   assert.ok(statuses(db, "google_calendar").every((row) => row.status === "delivered"));
@@ -207,14 +208,14 @@ test("a Discord permission error stops Discord's deliveries in that run and wait
 test("a rate limit stops Discord's deliveries, waits what Discord asked for, and is not counted as an attempt", async () => {
   const db = outreachDatabase(); let retryAfterMs = 7_000; let calls = 0;
   const providers = stubProviders({ fail: (provider) => provider === "discord" ? (calls++, outreachDiscordDeliveryError(new Error("Too Many Requests"), 429, retryAfterMs)) : undefined });
-  await queuedEvents(db, providers, 3);
-  assert.deepEqual(await processOutreachPublicationOperations(db, providers, now + 1_000), { delivered: 3, failed: 0, pending: 3 });
+  await queuedEvents(db, providers, 2);
+  assert.deepEqual(await processOutreachPublicationOperations(db, providers, now + 1_000), { delivered: 2, failed: 0, pending: 2 });
   assert.equal(calls, 1);
   let limited = statuses(db, "discord").find((row) => row.status === "failed");
   assert.deepEqual(limited, { status: "failed", attempts: 0, nextAttemptAt: iso(now + 1_000 + 60_000), lastError: outreachDiscordRateLimitMessage }, "at least a minute, and no attempt counted");
   // A longer retry_after is used as given; a later rate limit still counts no attempt.
   retryAfterMs = 600_000;
-  assert.deepEqual(await processOutreachPublicationOperations(db, providers, now + 120_000), { delivered: 0, failed: 0, pending: 3 });
+  assert.deepEqual(await processOutreachPublicationOperations(db, providers, now + 120_000), { delivered: 0, failed: 0, pending: 2 });
   assert.equal(calls, 2);
   limited = statuses(db, "discord").filter((row) => row.status === "failed");
   assert.equal(limited.filter((row) => row.nextAttemptAt === iso(now + 120_000 + 600_000)).length, 1); assert.ok(limited.every((row) => row.attempts === 0));
@@ -222,6 +223,15 @@ test("a rate limit stops Discord's deliveries, waits what Discord asked for, and
   retryAfterMs = 7_200_000;
   await processOutreachPublicationOperations(db, providers, now + 800_000);
   assert.equal(statuses(db, "discord").filter((row) => row.nextAttemptAt === iso(now + 800_000 + 3_600_000)).length, 1);
+});
+
+test("a run delivers at most 5, and the request that queued an Event delivers only that Event", async () => {
+  const db = outreachDatabase(); const providers = stubProviders();
+  const ids = await queuedEvents(db, providers, 4);
+  assert.deepEqual(await processOutreachPublicationOperations(db, providers, now, { activityId: ids[2] }), { delivered: 2, failed: 0, pending: 0 });
+  assert.deepEqual([...new Set(providers.calls.map((call) => call.activityId))], [ids[2]]);
+  assert.deepEqual(await processOutreachPublicationOperations(db, providers, now + 1_000), { delivered: 5, failed: 0, pending: 0 });
+  assert.deepEqual(await processOutreachPublicationOperations(db, providers, now + 2_000), { delivered: 1, failed: 0, pending: 0 });
 });
 
 test("Discord rate limits are recognized from SDK 1.3.0, SDK 1.2.0 and Core's older error text", () => {

@@ -140,14 +140,15 @@ export function parseOutreachPublicationEvent(value: unknown): OutreachPublicati
 }
 
 async function queuePublication(db: D1Database, providers: OutreachPublicationProviders, actor: string, activityId: string,
-  options: { automatic: boolean; backfill?: boolean; expectedActivityRevision: number; expectedPublicationRevision?: number | null; providers?: OutreachPublicationProvider[]; remove?: boolean }, now: number): Promise<OutreachPublicationQueueResult> {
+  options: { automatic: boolean; backfill?: boolean; preloaded?: { activity: Row; available: Record<OutreachPublicationProvider, boolean> }; expectedActivityRevision: number; expectedPublicationRevision?: number | null; providers?: OutreachPublicationProvider[]; remove?: boolean }, now: number): Promise<OutreachPublicationQueueResult> {
   const wanted = options.automatic ? await outreachAutomaticDestinations(db, activityId) : undefined;
   if (wanted && !wanted.length) return { automatic: true, queuedProviders: [], revision: null, reason: "disabled" };
-  const activity = await db.prepare(`SELECT a.*,s.time_zone AS time_zone FROM hours_activities a JOIN organization_settings s ON s.installation_id=a.installation_id WHERE a.installation_id=? AND a.id=?`).bind(installationId, activityId).first<Row>();
+  // Publish upcoming Events passes the activity and provider status it already read, to stay within the Free plan's queries.
+  const activity = options.preloaded?.activity ?? await db.prepare(`SELECT a.*,s.time_zone AS time_zone FROM hours_activities a JOIN organization_settings s ON s.installation_id=a.installation_id WHERE a.installation_id=? AND a.id=?`).bind(installationId, activityId).first<Row>();
   if (!activity || activity.mode !== "event" || activity.archived || Number(activity.revision) !== options.expectedActivityRevision) throw new HttpError(409, "Choose the current active Event activity before publishing");
   const existing = await db.prepare("SELECT * FROM hours_activity_publications WHERE installation_id=? AND activity_id=?").bind(installationId, activityId).first<Row>();
   if (options.expectedPublicationRevision !== undefined && (existing?.revision ?? null) !== options.expectedPublicationRevision) throw new HttpError(409, "Publication status changed; reload before publishing again");
-  const available = await providers.status(); const selected = options.providers ?? (wanted ?? supportedProviders).filter(provider => available[provider]);
+  const available = options.preloaded?.available ?? await providers.status(); const selected = options.providers ?? (wanted ?? supportedProviders).filter(provider => available[provider]);
   if (selected.some(provider => !available[provider])) throw new HttpError(409, "The selected publication provider is not configured and verified");
   if (!selected.length) {
     if (!options.automatic) throw new HttpError(409, "Configure and verify Google Calendar or Discord before publishing");
@@ -200,9 +201,19 @@ async function retry(db: D1Database, providers: OutreachPublicationProviders, ac
   return { status: 202, body: { activityId, revision, provider, status: "pending" } };
 }
 
-export async function processOutreachPublicationOperations(db: D1Database, providers: OutreachPublicationProviders, now = Date.now()): Promise<{ delivered: number; failed: number; pending: number }> {
+/**
+ * Deliveries per run, sized for the Workers Free plan (50 subrequests and 50 D1 queries an invocation). A Discord delivery
+ * makes at most 3 requests (a PATCH that finds the event gone, the list, then a create), and Core retries a short rate limit
+ * at most twice more before raising it, which stops Discord's deliveries for the run; a Google Calendar delivery makes at
+ * most 3 plus a token refresh. Each delivery also makes about 5 D1 queries (claim, credentials, completion, audit). Five
+ * deliveries stay near 25 of each, leaving room for Core's meeting calendar sync in the same maintenance pass.
+ */
+export const outreachPublicationBatchLimit = 5;
+
+/** Deliver queued work. `activityId` limits the run to one Event, as the request that queued it does for its first attempt. */
+export async function processOutreachPublicationOperations(db: D1Database, providers: OutreachPublicationProviders, now = Date.now(), options: { activityId?: string } = {}): Promise<{ delivered: number; failed: number; pending: number }> {
   const nowText = new Date(now).toISOString(); const available = await providers.status();
-  const rows = (await db.prepare(`SELECT o.*,p.time_zone,p.start_ms,p.end_ms,a.title,a.description,a.location FROM hours_publication_operations o JOIN hours_activity_publications p ON p.installation_id=o.installation_id AND p.activity_id=o.activity_id AND p.revision=o.publication_revision AND p.status='approved' JOIN hours_activities a ON a.installation_id=o.installation_id AND a.id=o.activity_id WHERE o.installation_id=? AND (o.action='delete' OR a.archived=0) AND (o.status='pending' OR (o.status='failed' AND o.next_attempt_at IS NOT NULL AND o.next_attempt_at<=?) OR (o.status='processing' AND o.lease_expires_at<=?)) ORDER BY o.updated_at,o.activity_id,o.provider LIMIT 10`).bind(installationId, nowText, nowText).all<Row>()).results ?? [];
+  const rows = (await db.prepare(`SELECT o.*,p.time_zone,p.start_ms,p.end_ms,a.title,a.description,a.location FROM hours_publication_operations o JOIN hours_activity_publications p ON p.installation_id=o.installation_id AND p.activity_id=o.activity_id AND p.revision=o.publication_revision AND p.status='approved' JOIN hours_activities a ON a.installation_id=o.installation_id AND a.id=o.activity_id WHERE o.installation_id=? AND (o.action='delete' OR a.archived=0) AND (o.status='pending' OR (o.status='failed' AND o.next_attempt_at IS NOT NULL AND o.next_attempt_at<=?) OR (o.status='processing' AND o.lease_expires_at<=?)) ${options.activityId ? "AND o.activity_id=?" : ""} ORDER BY o.updated_at,o.activity_id,o.provider LIMIT ${outreachPublicationBatchLimit}`).bind(installationId, nowText, nowText, ...(options.activityId ? [options.activityId] : [])).all<Row>()).results ?? [];
   let delivered = 0; let failed = 0; let pending = 0;
   // A destination that refused a permission or rate limited this run gets no more requests until the next run.
   const stopped = new Set<OutreachPublicationProvider>();
@@ -267,9 +278,11 @@ async function updateDestination(db: D1Database, providers: OutreachPublicationP
   return { status: 200, body: await destinationStatus(db, providers) };
 }
 
-// Publish upcoming Events pages like Core's Discord sync-all: 10 Events a request, and at most 100 in one run. The cursor
-// carries how many Events the run has selected, so the server ends the run at the limit.
-const backfillBatchLimit = 10; const backfillLimit = 100;
+// Publish upcoming Events pages like Core's Discord sync-all, at most 100 Events in one run, but 5 Events a request: each
+// Event costs 4 D1 reads and one batch of about 4 statements, and no provider requests, so a page stays within the Workers
+// Free plan's 50 queries even when every batch statement counts. The cursor carries how many Events the run has selected, so the server
+// ends the run at the limit. Delivery is left to the queue.
+const backfillBatchLimit = 5; const backfillLimit = 100;
 function backfillCursor(value: string | null): { serviceDate: string; id: string; selected: number } | undefined {
   if (!value) return undefined;
   try {
@@ -303,12 +316,12 @@ async function backfill(db: D1Database, providers: OutreachPublicationProviders,
   for (const activity of activities) {
     const activityId = String(activity.id);
     try { publicationTiming(activity, organization.timeZone, now, true); } catch { skipped += 1; continue; }
-    const existing = await db.prepare("SELECT revision FROM hours_activity_publications WHERE installation_id=? AND activity_id=?").bind(installationId, activityId).first<{ revision: number }>();
-    const operations = existing ? (await db.prepare("SELECT provider,action,status FROM hours_publication_operations WHERE installation_id=? AND activity_id=? AND publication_revision=?").bind(installationId, activityId, existing.revision).all<Row>()).results ?? [] : [];
+    const operations = (await db.prepare("SELECT p.revision,o.provider,o.action,o.status FROM hours_activity_publications p LEFT JOIN hours_publication_operations o ON o.installation_id=p.installation_id AND o.activity_id=p.activity_id AND o.publication_revision=p.revision WHERE p.installation_id=? AND p.activity_id=?").bind(installationId, activityId).all<Row>()).results ?? [];
+    const existing = operations[0] ? { revision: Number(operations[0].revision) } : null;
     // Published, waiting or being delivered stays as it is; a removal or a failed delivery is queued again.
     const needed = enabled.filter((provider) => !operations.some((row) => row.provider === provider && row.action === "publish" && row.status !== "failed"));
     if (!needed.length) { skipped += 1; continue; }
-    try { await queuePublication(db, providers, actor, activityId, { automatic: false, backfill: true, expectedActivityRevision: Number(activity.revision), expectedPublicationRevision: existing ? Number(existing.revision) : null, providers: needed }, now); queued += 1; }
+    try { await queuePublication(db, providers, actor, activityId, { automatic: false, backfill: true, preloaded: { activity: { ...activity, time_zone: organization.timeZone }, available }, expectedActivityRevision: Number(activity.revision), expectedPublicationRevision: existing ? Number(existing.revision) : null, providers: needed }, now); queued += 1; }
     catch { failed += 1; }
   }
   const selected = (cursor?.selected ?? 0) + activities.length;

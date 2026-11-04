@@ -137,7 +137,7 @@ export function OutreachAutomaticPublicationSetting() {
   async function publishUpcoming() {
     setBusy(true); setNotice(undefined); setOffer(false);
     try {
-      // Pages of 10 like Core's Discord calendar sync-all; the server ends the run at its limit of 100 Events.
+      // Pages like Core's Discord calendar sync-all, 5 Events each; the server ends the run at its limit of 100 Events.
       const total = { selected: 0, queued: 0, skipped: 0, failed: 0 }; let cursor: string | null = null;
       do {
         const page: BackfillPage = await api<BackfillPage>(`/admin/hours/publication-destinations/backfill${cursor ? `?after=${encodeURIComponent(cursor)}` : ""}`, { method: "POST", body: "{}" });
