@@ -118,10 +118,11 @@ const manifest = defineModuleManifest({
       { table: "hours_publication_operations", columns: ["status", "next_attempt_at", "lease_token", "lease_expires_at"] },
     ],
   },
-  // Versions 3 and 4 are the plugin section; version 4 added member-added teams and entry timing. Version 2 rows come only
-  // from Core's section of backups made while Outreach was first-party.
+  // Versions 3 to 5 are the plugin section; version 4 added member-added teams and entry timing, and version 5 the
+  // per-destination automatic publication switches. Version 2 rows come only from Core's section of backups made while
+  // Outreach was first-party.
   backup: {
-    version: 4,
+    version: 5,
     tables: [
       "hours_categories", "hours_labels", "hours_teams", "hours_activities", "hours_activity_labels", "hours_entry_settings", "hours_entries", "hours_entry_revisions",
       "hours_submission_keys", "hours_reopen_windows", "hours_correction_requests", "hours_correction_resolutions",

@@ -1,6 +1,6 @@
 // Outreach's Worker contribution. Handlers receive Core's module context and the module-scoped database; plugins never see
 // the Worker environment, so the public submission route checks requests against Core's dashboard origin from the context.
-import { defineApiModule } from "@lancerlogin/module-sdk/api";
+import { defineApiModule, type D1Database } from "@lancerlogin/module-sdk/api";
 import { outreachBackupAdapter } from "./api/outreach-backup.ts";
 import { outreachCatalogRoute, outreachSetupRoute } from "./api/outreach-catalogs.ts";
 import { outreachDiscordHandlers } from "./api/outreach-discord.ts";
@@ -9,11 +9,20 @@ import { outreachCleanupBlocker, outreachCleanupSteps } from "./api/outreach-lif
 import { outreachSetupPredicates, outreachSetupStepValid } from "./api/outreach-module-setup.ts";
 import { outreachPublicRoute } from "./api/outreach-public.ts";
 import { publicFormSettingsRoute } from "./api/outreach-public-settings.ts";
-import { outreachPublicationRoute, processOutreachPublicationOperations } from "./api/outreach-publication.ts";
+import { outreachPublicationRoute, processOutreachPublicationOperations, type OutreachPublicationProviders } from "./api/outreach-publication.ts";
 import { outreachPublicationProviders } from "./api/outreach-publication-providers.ts";
 import { outreachLabelFilterOptions, outreachReportHandlers } from "./api/outreach-reporting.ts";
 import { outreachReviewRoute } from "./api/outreach-review.ts";
 import { ensureSupportedTeam, ensureTeamSupportActivity, findSupportedTeams } from "./api/outreach-team-support.ts";
+
+/**
+ * The first delivery attempt for one Event, in the request that queued it, so Staff do not wait for the next five-minute
+ * pass. It is one Event, at most one delivery per destination, a few provider requests. A failure stays queued for the
+ * job, which retries it, so the save itself never fails here.
+ */
+async function deliverNow(db: D1Database, providers: OutreachPublicationProviders, activityId: string) {
+  try { await processOutreachPublicationOperations(db, providers, Date.now(), { activityId }); } catch { /* The publication job retries queued deliveries. */ }
+}
 
 const defaultCategories = [["event", "Event", "event"], ["team-support", "Team Support", "team"], ["other-service", "Other Service", "task"]] as const;
 
@@ -33,14 +42,18 @@ const api = defineApiModule({
         const routed = await publicFormSettingsRoute(context.db, principal.userId, context.request, await context.body());
         return context.respond(routed.body, routed.status);
       }
-      if (path === "/admin/hours/publication-settings") {
+      // Automatic publication switches, their delivery status and Publish upcoming Events are Admin settings.
+      if (path === "/admin/hours/publication-settings" || path === "/admin/hours/publication-destinations" || path === "/admin/hours/publication-destinations/backfill") {
         const principal = await context.requireRole(["admin"]);
         const routed = await outreachPublicationRoute(context.db, outreachPublicationProviders(context.services), principal.userId, context.request, await context.body());
         return context.respond(routed.body, routed.status);
       }
       if (path === "/admin/hours/publications" || path === "/admin/hours/publication-providers" || /^\/admin\/hours\/activities\/[^/]+\/publication(?:\/|$)/.test(path)) {
         const principal = await context.requireRole(["admin", "operator"]);
-        const routed = await outreachPublicationRoute(context.db, outreachPublicationProviders(context.services), principal.userId, context.request, await context.body());
+        const providers = outreachPublicationProviders(context.services);
+        const routed = await outreachPublicationRoute(context.db, providers, principal.userId, context.request, await context.body());
+        const activity = /^\/admin\/hours\/activities\/([^/]+)\/publication/.exec(path)?.[1];
+        if (activity && context.request.method === "POST" && routed.status === 202) await deliverNow(context.db, providers, decodeURIComponent(activity));
         return context.respond(routed.body, routed.status);
       }
       if (/^\/admin\/hours\/(reopen-windows|corrections)(?:\/|$)/.test(path)) {
@@ -56,7 +69,10 @@ const api = defineApiModule({
       }
       if (!path.startsWith("/admin/hours/")) return undefined;
       const principal = await context.requireRole(["admin", "operator"]);
-      const routed = await outreachCatalogRoute(context.db, principal.userId, context.request, await context.body(), outreachPublicationProviders(context.services));
+      const providers = outreachPublicationProviders(context.services);
+      const routed = await outreachCatalogRoute(context.db, principal.userId, context.request, await context.body(), providers);
+      const saved = routed.body as { id?: unknown; publicationQueue?: { queuedProviders?: unknown[] } } | null;
+      if (typeof saved?.id === "string" && saved.publicationQueue?.queuedProviders?.length) await deliverNow(context.db, providers, saved.id);
       return context.respond(routed.body, routed.status);
     },
     async "/public/hours"(context) {

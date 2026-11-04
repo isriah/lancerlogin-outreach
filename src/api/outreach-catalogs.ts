@@ -1,7 +1,7 @@
 import type { D1Database } from "@lancerlogin/module-sdk/api";
 import { HttpError } from "@lancerlogin/module-sdk/api";
 import { outreachPrograms } from "../shared/outreach-programs.ts";
-import { queueAutomaticOutreachPublication, queueOutreachPublicationCleanup, readOutreachPublicationSetting, validateOutreachEventSchedule, type OutreachPublicationProviders, type OutreachPublicationQueueResult } from "./outreach-publication.ts";
+import { outreachAutomaticDestinations, queueAutomaticOutreachPublication, queueOutreachPublicationCleanup, validateOutreachEventSchedule, type OutreachPublicationProviders, type OutreachPublicationQueueResult } from "./outreach-publication.ts";
 
 type Row = Record<string, unknown>;
 type CatalogKind = "labels" | "teams" | "activities";
@@ -198,8 +198,9 @@ async function write(db: D1Database, actor: string, kind: CatalogKind, id: strin
     row.source_snapshot = existing?.source_snapshot ?? null;
     if (row.mode === "event") {
       const timing = await validateOutreachEventSchedule(db, row, nowMs, false, false);
-      const setting = await readOutreachPublicationSetting(db);
-      if (setting.automatic && !row.archived) {
+      // Saving queues the destinations whose switch is on, and updates the Event wherever it is already published.
+      const automaticDestinations = await outreachAutomaticDestinations(db, id);
+      if (automaticDestinations.length && !row.archived) {
         if (timing && timing.endMs > nowMs) queueAutomatically = true;
         else if (!timing) {
           const settings = await db.prepare("SELECT time_zone AS timeZone FROM organization_settings WHERE installation_id=?").bind(installationId).first<{ timeZone: string }>();
