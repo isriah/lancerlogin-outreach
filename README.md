@@ -54,7 +54,7 @@ When a member adds a new team, the public form checks its number and program wit
 
 ## Importing activities from CSV
 
-**Import CSV**, just left of **+ Create activity** on the Outreach page (`/hours`), imports up to 200 dated activities of any type from a CSV file or rows pasted from a spreadsheet, for anyone who can create activities (Admins and Operators, `hours.manage`). It works like Core's meeting import and uses the module SDK 1.4.0 CSV kit: **Download template** gives the columns with synthetic examples, and **Preview activities** shows every row before anything is saved.
+**Import CSV**, just left of **+ Create activity** on the Outreach page (`/hours`) (on phones the calendar view shows it below the month navigation instead), imports up to 200 dated activities of any type from a CSV file or rows pasted from a spreadsheet, for anyone who can create activities (Admins and Operators, `hours.manage`). It works like Core's meeting import and uses the module SDK 1.4.0 CSV kit: **Download template** gives the columns with synthetic examples, and **Preview activities** shows every row before anything is saved.
 
 | Column | Required | Also matched | Rule |
 | --- | --- | --- | --- |

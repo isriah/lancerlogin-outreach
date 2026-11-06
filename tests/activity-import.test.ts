@@ -326,7 +326,8 @@ test("Import CSV opens the dialog from the Outreach page, which renders Core's i
   assert.match(workspace, /const importButton = <button className="ui-button" type="button" aria-haspopup="dialog" onClick=\{\(\) => setImporting\(true\)\}>Import CSV<\/button>/);
   assert.match(workspace, /compact-table-controls outreach-activity-browser-controls has-import-action ui-card/);
   assert.match(workspace, /\{importButton\}<button className="ui-button ui-button--primary" type="button" aria-haspopup="dialog" data-walkthrough="outreach-submission-sources" onClick=\{\(\) => setCreating\(true\)\}><span aria-hidden="true">\+ <\/span>Create activity/);
-  assert.match(workspace, /action=\{<>\{importButton\}<button className="ui-button ui-button--primary"/);
+  // In the calendar it is MonthCalendar's secondaryAction: beside Create activity on desktop, below the month navigation on phones.
+  assert.match(workspace, /secondaryAction=\{importButton\} action=\{<button className="ui-button ui-button--primary"/);
   assert.match(workspace, /<OutreachActivityImportDialog open=\{importing\} timeZone=\{context\.timeZone\}/);
   assert.match(dialog, /<h2 id="outreach-import-title">Import Outreach activities<\/h2>/);
   for (const marker of ['className="roster-import-dialog outreach-activity-import-dialog"', 'className="import-preview-bar"', 'className="meeting-view-toggle import-match-choice"', 'className="data-table roster-preview-table import-preview-table"', "import-row-select ${choice}", "change-badge ${row.action}", 'className="import-row-note"', 'className="import-arrow"', "import-issue-error", 'className="field-help import-preview-summary"', "Matching rows:", '"Skip all" : "Update all"', "Mixed"]) assert.ok(dialog.includes(marker), marker);
