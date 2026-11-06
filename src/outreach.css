@@ -238,3 +238,6 @@
 /* Supported teams a member added from the public form, until Staff mark them reviewed. */
 :where([data-module="hour-tracking"]) .outreach-team-source { display: inline-block; width: fit-content; margin-inline-start: var(--space-2); padding: var(--space-1) var(--space-3); border: 1px solid currentColor; border-radius: var(--radius-pill); font-size: var(--text-caption); font-weight: 800; }
 :where([data-module="hour-tracking"]) .outreach-team-record .ui-button { margin-top: var(--space-2); }
+/* The CSV import dialog uses the shared ui-button pattern but keeps the size of Core's meeting import controls. */
+.app :where([data-module="hour-tracking"]) .outreach-activity-import-dialog button.ui-button { padding-inline: var(--space-3); font-size: inherit; }
+.app :where([data-module="hour-tracking"]) .outreach-activity-import-dialog .dialog-heading > button.ui-button { padding: var(--space-1); font-size: 1.4rem; }

@@ -329,7 +329,12 @@ test("Import CSV opens the dialog from the Outreach page, which renders Core's i
   assert.match(workspace, /action=\{<>\{importButton\}<button className="ui-button ui-button--primary"/);
   assert.match(workspace, /<OutreachActivityImportDialog open=\{importing\} timeZone=\{context\.timeZone\}/);
   assert.match(dialog, /<h2 id="outreach-import-title">Import Outreach activities<\/h2>/);
-  for (const marker of ['className="roster-import-dialog"', 'className="import-preview-bar"', 'className="meeting-view-toggle import-match-choice"', 'className="data-table roster-preview-table import-preview-table"', "import-row-select ${choice}", "change-badge ${row.action}", 'className="import-row-note"', 'className="import-arrow"', "import-issue-error", 'className="field-help import-preview-summary"', "Matching rows:", '"Skip all" : "Update all"', "Mixed"]) assert.ok(dialog.includes(marker), marker);
+  for (const marker of ['className="roster-import-dialog outreach-activity-import-dialog"', 'className="import-preview-bar"', 'className="meeting-view-toggle import-match-choice"', 'className="data-table roster-preview-table import-preview-table"', "import-row-select ${choice}", "change-badge ${row.action}", 'className="import-row-note"', 'className="import-arrow"', "import-issue-error", 'className="field-help import-preview-summary"', "Matching rows:", '"Skip all" : "Update all"', "Mixed"]) assert.ok(dialog.includes(marker), marker);
+  // Every dialog control uses Core's shared UI classes, as Core's reviewed UI inventory asks.
+  assert.deepEqual([...dialog.matchAll(/<button[^>]*>/g)].filter((tag) => !/className="ui-button[ "]/.test(tag[0])), []);
+  assert.equal([...dialog.matchAll(/<button className="ui-button ui-button--primary"/g)].length, 2);
+  assert.doesNotMatch(dialog, /primary-button/);
+  assert.match(dialog, /<textarea className="ui-control code-textarea"/);
   // The preview's columns, in the approved order; each row is one fixed-height line (Core's import-preview-table rules).
   assert.match(dialog, /<th scope="col">Change<\/th><th scope="col">Title<\/th><th scope="col">Date<\/th><th scope="col">Type<\/th><th scope="col">Time<\/th><th scope="col">Team<\/th><th scope="col">Labels<\/th><th scope="col">Issues<\/th>/);
   assert.doesNotMatch(dialog, /<br|white-space|style=/, "no row-height overrides");

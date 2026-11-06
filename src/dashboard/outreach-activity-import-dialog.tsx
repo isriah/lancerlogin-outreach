@@ -59,7 +59,7 @@ export function OutreachActivityImportDialog({ open, timeZone, onClose, onImport
   }
 
   if (!open) return null;
-  const heading = <div className="dialog-heading"><div><h2 id="outreach-import-title">Import Outreach activities</h2><p>{preview ? "Review each activity before importing." : "Upload a CSV file or paste spreadsheet rows, then preview every activity."}</p></div><button type="button" aria-label="Close Outreach import" disabled={busy} onClick={close}>×</button></div>;
+  const heading = <div className="dialog-heading"><div><h2 id="outreach-import-title">Import Outreach activities</h2><p>{preview ? "Review each activity before importing." : "Upload a CSV file or paste spreadsheet rows, then preview every activity."}</p></div><button className="ui-button" type="button" aria-label="Close Outreach import" disabled={busy} onClick={close}>×</button></div>;
   const errorMessages = errors.length > 0 && <div id="outreach-import-errors" className="inline-messages error" role="alert" tabIndex={-1}><strong>Please fix the activities file</strong><ul>{errors.map((error) => <li key={error}>{error}</li>)}</ul></div>;
   let content;
   if (!preview) {
@@ -68,15 +68,15 @@ export function OutreachActivityImportDialog({ open, timeZone, onClose, onImport
       <div className="roster-import-file" role="group" aria-labelledby="outreach-import-file-label">
         <span id="outreach-import-file-label">CSV file</span>
         <div className="roster-import-file-controls">
-          <button type="button" aria-label="Choose CSV file" disabled={readingFile} onClick={() => fileInput.current?.click()}>Choose File</button>
+          <button className="ui-button" type="button" aria-label="Choose CSV file" disabled={readingFile} onClick={() => fileInput.current?.click()}>Choose File</button>
           <span className="roster-import-filename" aria-live="polite">{sourceName || "No file chosen"}</span>
           <input ref={fileInput} type="file" accept=".csv,text/csv" aria-label="CSV file" hidden tabIndex={-1} disabled={readingFile} onChange={(event) => void chooseFile(event)} />
         </div>
       </div>
       {sourceName && <p className="field-help" role="status">Loaded {sourceName}. Review the rows below before previewing.</p>}
-      <label>Activities CSV or spreadsheet rows<textarea className="code-textarea" rows={7} value={csv} placeholder="Paste CSV with headers or tab-separated spreadsheet rows" disabled={readingFile} onChange={(event) => { setCsv(event.target.value); setSourceName(""); setErrors([]); }} aria-describedby={errors.length ? "outreach-import-errors" : "outreach-import-help"} aria-invalid={errors.length > 0} /></label>
+      <label>Activities CSV or spreadsheet rows<textarea className="ui-control code-textarea" rows={7} value={csv} placeholder="Paste CSV with headers or tab-separated spreadsheet rows" disabled={readingFile} onChange={(event) => { setCsv(event.target.value); setSourceName(""); setErrors([]); }} aria-describedby={errors.length ? "outreach-import-errors" : "outreach-import-help"} aria-invalid={errors.length > 0} /></label>
       <div className="roster-import-format" role="group" aria-labelledby="outreach-import-format-title">
-        <div className="roster-import-format-heading"><span id="outreach-import-format-title">CSV format</span><button type="button" onClick={downloadTemplate}>Download template</button></div>
+        <div className="roster-import-format-heading"><span id="outreach-import-format-title">CSV format</span><button className="ui-button" type="button" onClick={downloadTemplate}>Download template</button></div>
         <table className="roster-format-table"><caption className="visually-hidden">Outreach activity CSV columns</caption>
           <thead><tr><th scope="col">Column</th><th scope="col">Required</th><th scope="col">Example</th></tr></thead>
           <tbody>{outreachActivityCsvFieldHelp.map((column) => <tr key={column.field}><th scope="row">{column.label}</th><td>{column.required}</td><td>{column.example && <code>{column.example}</code>}</td></tr>)}</tbody>
@@ -84,7 +84,7 @@ export function OutreachActivityImportDialog({ open, timeZone, onClose, onImport
         <p id="outreach-import-help" className="field-help">{importHelpText(timeZone)}</p>
       </div>
       {errorMessages}
-      <div className="dialog-actions"><button type="button" onClick={close}>Cancel</button><button className="primary-button" type="button" disabled={readingFile || busy} onClick={() => void prepare()}>{readingFile ? "Reading file…" : busy ? "Checking…" : "Preview activities"}</button></div>
+      <div className="dialog-actions"><button className="ui-button" type="button" onClick={close}>Cancel</button><button className="ui-button ui-button--primary" type="button" disabled={readingFile || busy} onClick={() => void prepare()}>{readingFile ? "Reading file…" : busy ? "Checking…" : "Preview activities"}</button></div>
     </>;
   } else {
     const { summary } = preview; const importing = summary.add + summary.update; const problems = preview.rows.filter((row) => row.action === "error");
@@ -129,8 +129,8 @@ export function OutreachActivityImportDialog({ open, timeZone, onClose, onImport
       {problems.length > 0 && <div id="outreach-import-errors" className="inline-messages error" role="alert" tabIndex={-1}><strong>{problemHeading(problems.length)}</strong> Fix the file and preview again, or import the other rows.<ul>{problems.map((row) => <li key={row.rowNumber}>{problemText(row)}</li>)}</ul></div>}
       {errors.length > 0 && !problems.length && errorMessages}
       <p className="field-help import-preview-summary" role="status">{summaryText(summary)}</p>
-      <div className="dialog-actions"><button type="button" disabled={busy} onClick={() => setPreview(undefined)}>Back</button><button className="primary-button" type="button" disabled={busy || !importing} onClick={() => void confirm()}>{busy ? "Working…" : importButtonText(summary)}</button></div>
+      <div className="dialog-actions"><button className="ui-button" type="button" disabled={busy} onClick={() => setPreview(undefined)}>Back</button><button className="ui-button ui-button--primary" type="button" disabled={busy || !importing} onClick={() => void confirm()}>{busy ? "Working…" : importButtonText(summary)}</button></div>
     </>;
   }
-  return <div className="dialog-backdrop"><div role="dialog" aria-modal="true" aria-labelledby="outreach-import-title" tabIndex={-1} ref={dialog}><section className="roster-import-dialog" aria-labelledby="outreach-import-title">{content}</section></div></div>;
+  return <div className="dialog-backdrop"><div role="dialog" aria-modal="true" aria-labelledby="outreach-import-title" tabIndex={-1} ref={dialog}><section className="roster-import-dialog outreach-activity-import-dialog" aria-labelledby="outreach-import-title">{content}</section></div></div>;
 }
