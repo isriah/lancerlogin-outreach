@@ -3,6 +3,7 @@ import { SettingsSectionNavigation, settingsSectionHref } from "@lancerlogin/mod
 import { usePath } from "@lancerlogin/module-sdk/dashboard";
 import { dashboardApi as api } from "@lancerlogin/module-sdk/dashboard";
 import { useModalFocus } from "@lancerlogin/module-sdk/dashboard";
+import { ReportingStartDateField } from "@lancerlogin/module-sdk/dashboard";
 import { outreachPrograms } from "../shared/outreach-programs.ts";
 import { OutreachAutomaticPublicationSetting } from "./outreach-activity-publication";
 import { OutreachPublicFormSettings } from "./outreach-public-settings";
@@ -26,7 +27,7 @@ export function OutreachSettings({ isAdmin = true, onOpenSetup }: { isAdmin?: bo
   return <section className="outreach-stack outreach-settings-tabs" aria-label="Outreach settings">
     <SettingsSectionNavigation label="Outreach settings sections" pickerLabel="Outreach section" currentHref={settingsSectionHref(path, search, tab)} navigate={navigate} sections={([...(isAdmin ? ["general"] : []), "teams", "labels"] as Array<"general" | Kind>).map(item => [settingsSectionHref(path, search, item), item === "general" ? "General" : `${item === "teams" ? "Supported teams" : "Labels"}${counts[item] === undefined ? "" : ` (${counts[item]})`}`])} />
     {notice && <p className="ui-status" data-tone={notice.tone} role={notice.tone === "error" ? "alert" : "status"}>{notice.text}</p>}
-    {tab === "general" && <div className="outreach-stack"><OutreachReportingSettings /><OutreachAutomaticPublicationSetting /><OutreachPublicFormSettings />{onOpenSetup && <article className="settings-callout"><div><h2>Reopen Outreach setup</h2><p>Review one setup card at a time.</p></div><button className="ui-button" type="button" onClick={onOpenSetup}>Open Outreach setup</button></article>}</div>}
+    {tab === "general" && <div className="outreach-stack"><OutreachReportingSettings /><ReportingStartDateField moduleId="hour-tracking" /><OutreachAutomaticPublicationSetting /><OutreachPublicFormSettings />{onOpenSetup && <article className="settings-callout"><div><h2>Reopen Outreach setup</h2><p>Review one setup card at a time.</p></div><button className="ui-button" type="button" onClick={onOpenSetup}>Open Outreach setup</button></article>}</div>}
     {tab !== "general" && <Catalog key={tab} kind={tab} onChanged={refreshCounts} setNotice={setNotice} />}
   </section>;
 }
@@ -39,7 +40,7 @@ function OutreachReportingSettings() {
     try { const result = await api<{ values: NonNullable<typeof rules> }>("/module-setup/hour-tracking/rules", { method: "PUT", body: JSON.stringify({ ...rules, reportingDays: days }) }); setRules(result.values); setNotice({ tone: "success", text: "Reporting default saved." }); }
     catch (error) { setNotice({ tone: "error", text: (error as Error).message }); } finally { setSaving(false); }
   }
-  return <article className="ui-card outreach-stack"><div><h2>Reporting defaults</h2><p>Activities use this installation's reporting window. Staff can reopen reporting for 24 hours from the activity details.</p></div><form className="ui-form form-grid" onSubmit={event => void save(event)}><label>Reporting window in days<input className="ui-control" type="number" required min={1} max={365} value={days} disabled={saving || !rules} onChange={event => setDays(Number(event.target.value))} /></label><button className="ui-button ui-button--primary" type="submit" disabled={saving || !rules}>Save reporting default</button></form>{notice && <p className="ui-status" data-tone={notice.tone} role={notice.tone === "error" ? "alert" : "status"}>{notice.text}</p>}</article>;
+  return <article className="ui-card outreach-stack"><div><h2>Reporting defaults</h2><p>Activities use this installation's reporting window. Staff can reopen reporting for 24 hours from the activity details. The window limits how far back participation can be logged; it does not affect reports.</p></div><form className="ui-form form-grid" onSubmit={event => void save(event)}><label>Reporting window in days<input className="ui-control" type="number" required min={1} max={365} value={days} disabled={saving || !rules} onChange={event => setDays(Number(event.target.value))} /></label><button className="ui-button ui-button--primary" type="submit" disabled={saving || !rules}>Save reporting default</button></form>{notice && <p className="ui-status" data-tone={notice.tone} role={notice.tone === "error" ? "alert" : "status"}>{notice.text}</p>}</article>;
 }
 
 function Catalog({ kind, onChanged, setNotice }: { kind: Kind; onChanged: () => Promise<void>; setNotice: (notice: Notice) => void }) {
