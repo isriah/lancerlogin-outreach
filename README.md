@@ -52,6 +52,27 @@ When a member adds a new team, the public form checks its number and program wit
 - On submission, Outreach checks again on the server before it adds the team, and stores FIRST's name instead of the typed one when FIRST finds the team. It asks only for a team that is not already on the supported teams list, and never refuses a submission because FIRST is unavailable or has no such team. Retrying an exact submission returns the saved receipt without asking again.
 - Core caches answers and allows each public visitor 10 uncached lookups a minute, so a rate-limited check reads as unavailable.
 
+## Importing activities from CSV
+
+**Import CSV**, just left of **+ Create activity** on the Outreach page (`/hours`) (on phones the calendar view shows it below the month navigation instead), imports up to 200 dated activities of any type from a CSV file or rows pasted from a spreadsheet, for anyone who can create activities (Admins and Operators, `hours.manage`). It works like Core's meeting import and uses the module SDK 1.4.0 CSV kit: **Download template** gives the columns with synthetic examples, and **Preview activities** shows every row before anything is saved.
+
+| Column | Required | Also matched | Rule |
+| --- | --- | --- | --- |
+| Title | Yes | Activity, Event, Name | 1 to 150 characters |
+| Date | Yes | Service date, Event date | MM/DD/YYYY, such as 11/14/2026, or 2026-11-14 |
+| Type | No | Activity type, Mode | Event, Team support or Other service; Event when blank |
+| Start time, End time | No | Start, End | Events only, both or neither (neither is all day); 24-hour or AM/PM, in five-minute steps, in the installation's time zone |
+| Supported team | Team support only | Team, Team number | A team number or exact name of a supported team that is not archived |
+| Labels | No | Outreach labels | Active Outreach label names, separated by `;` |
+| Location | No | Place, Venue | Up to 300 characters |
+| Description | No | Details, Notes | Up to 4,000 characters |
+| Impact relevant | No | Impact, Counts toward impact | yes or no; yes when blank |
+
+- **Checks.** Rows are checked as saving an activity checks them, in the preview and again on the server. A row with a problem stays listed with its reason and is skipped; the other rows can still be imported. A local time that clocks skip for daylight saving time is a problem; one they repeat uses the first occurrence, with a warning.
+- **Matching.** A row with the same date, type, title (ignoring letter case) and supported team as an active activity matches it. Each matching row has a **Skip** or **Update** choice, and **Matching rows: Skip all / Update all** sets them all (Mixed when they differ); Skip is the default. An update shows old and new values, changes only the columns the file has, and is saved as editing the activity saves it, at its current revision.
+- **Event publication.** An imported or updated Event that has not ended yet is queued to each destination whose automatic switch is on, and an updated Event to each destination it is already published to, as saving it does; the preview notes where. Delivery is left to the `hour-tracking.publication` job (5 deliveries a run), so an import makes no provider requests.
+- **Budget.** `POST /admin/hours/activities/import` takes `{ rows, dryRun, actions }`; a dry run returns each row's result. A commit writes every row that is not a problem, its labels and its Event publication in one D1 batch with one `outreach.activities.imported` audit row, and rolls back entirely if an activity changed since the request read it. A 200-row commit makes at most 9 D1 queries plus Core's two destination status reads.
+
 ## Event publication
 
 Event activities can be published as Discord scheduled events and Google Calendar events through Core's shared connections, which an Admin sets up in **Settings > Integrations**. Team Support and Other Service activities are never published. Outreach creates no channel posts; an Event's location goes in the Discord event's description. Staff publish, update, unpublish or retry one Event with the destination icons in its details.

@@ -80,3 +80,6 @@ export function elapsedIntegerMinutes(startMilliseconds, endMilliseconds) {
   if (difference % 60_000 !== 0) throw new CivilTimeError("non_integral_duration", "Elapsed duration must be a whole number of minutes");
   return difference / 60_000;
 }
+
+// SDK 1.4.0 adds the CSV import kit to this entry.
+export * from "./module-sdk-csv-import-stub.mjs";

@@ -1,6 +1,7 @@
 // Outreach's Worker contribution. Handlers receive Core's module context and the module-scoped database; plugins never see
 // the Worker environment, so the public submission route checks requests against Core's dashboard origin from the context.
-import { defineApiModule, type D1Database } from "@lancerlogin/module-sdk/api";
+import { defineApiModule, HttpError, type D1Database } from "@lancerlogin/module-sdk/api";
+import { runOutreachActivityImport } from "./api/outreach-activity-import.ts";
 import { outreachBackupAdapter } from "./api/outreach-backup.ts";
 import { outreachCatalogRoute, outreachSetupRoute } from "./api/outreach-catalogs.ts";
 import { outreachDiscordHandlers } from "./api/outreach-discord.ts";
@@ -66,6 +67,12 @@ const api = defineApiModule({
         if (context.request.method === "PATCH") context.requireDashboardOrigin("Participation edits require the dashboard origin");
         const routed = await outreachEntryRoute(context.db, principal.userId, context.request, await context.body());
         return context.respond(routed.body, routed.status);
+      }
+      // CSV import of activities: the same roles as creating one. Delivery is left to the publication job.
+      if (path === "/admin/hours/activities/import") {
+        const principal = await context.requireRole(["admin", "operator"]);
+        if (context.request.method !== "POST") throw new HttpError(405, "Use POST to import Outreach activities");
+        return context.respond(await runOutreachActivityImport(context.db, principal.userId, await context.body(1_048_576), outreachPublicationProviders(context.services)), 200);
       }
       if (!path.startsWith("/admin/hours/")) return undefined;
       const principal = await context.requireRole(["admin", "operator"]);

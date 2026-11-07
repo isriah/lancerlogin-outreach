@@ -11,3 +11,6 @@ export const reportFilterSelection = () => ({ ids: [], match: "any" });
 export const reportRosterData = async () => ({ members: [], labels: new Map() });
 export const reportMemberIncluded = () => true;
 export const reportMemberValues = () => ({});
+
+/** The Worker contribution as declared, so a test can call its route handlers with a stand-in context. */
+export const defineApiModule = (definition) => definition;
