@@ -2,6 +2,10 @@
 
 All notable changes to the LancerLogin Outreach plugin. Versions follow LancerLogin's release rules: stable `X.Y.Z`, beta `X.Y.Z-beta.N`. Testing-only nightly builds (`X.Y.Z-nightly.YYYYMMDD`) are not listed here; their GitHub prereleases list their commits. Full patch notes for each release are in [docs/releases](docs/releases/README.md).
 
+## [1.4.0] - 2026-11-20
+
+Members can run **`/outreach-report`** in Discord to privately see their own counted Outreach participation: hours, distinct activities and entries since the Outreach reporting start date (operational baseline), by activity type, with an all-time line (all-time totals when no start date is set), their 5 most recent entries with full receipt references for `/outreach-correction`, and how many correction requests are still open. It needs a Discord account linked to exactly one active roster member. No migration; Outreach backup version 5 and the supported LancerLogin Core range `>=2.1.0-beta.7 <3.0.0` (module SDK 1.5.0) are unchanged. See [v1.4.0](docs/releases/v1.4.0.md).
+
 ## [1.3.1] - 2026-11-20
 
 In the **Create Outreach activity** and **Edit Outreach activity** dialogs, Tab now moves from the hour to the minutes to AM/PM in **Event start time** and **Event end time** instead of skipping ahead after a typed hour or minutes, and the **Outreach labels (optional)** checkboxes sit in a compact grid instead of one tall row each. No migration; Outreach backup version 5 and the supported LancerLogin Core range `>=2.1.0-beta.7 <3.0.0` (module SDK 1.5.0) are unchanged. See [v1.3.1](docs/releases/v1.3.1.md).

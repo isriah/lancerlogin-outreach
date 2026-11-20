@@ -29,6 +29,7 @@ Outreach is LancerLogin's first official plugin. Every installation build includ
 | 1.1.x | `>=2.0.0-beta.15 <3.0.0` (Modular 2.0.0-beta.15, the first Core with module SDK 1.1.0, and later 2.x releases) | 1 |
 | 1.2.x | `>=2.1.0-beta.3 <3.0.0` (Core 2.1.0-beta.3, the first Core with module SDK 1.2.0 and its shared FIRST connection, `services.first`, and later 2.x releases) | 1 |
 | 1.3.x | `>=2.1.0-beta.7 <3.0.0` (Core 2.1.0-beta.7, the first Core with module SDK 1.5.0, and later 2.x releases) | 1 |
+| 1.4.x | `>=2.1.0-beta.7 <3.0.0` (Core 2.1.0-beta.7, the first Core with module SDK 1.5.0, and later 2.x releases) | 1 |
 
 The supported Core range is the `lancerlogin.core` field in `package.json`. Composition refuses this plugin for a Core outside that range, before an installation build or web update starts. React and `@lancerlogin/module-sdk` are peer dependencies provided by Core; the `@lancerlogin/module-sdk` range also refuses a Core whose SDK is too old.
 
@@ -40,6 +41,14 @@ On the public form, a member chooses what they are logging: a **Scheduled activi
 - **Other service** takes a short description (up to 150 characters), such as "STEM tutoring". The entry joins the Other Service activity with that title on that date, created when there is none, and keeps the description in its notes.
 
 Duration-only entries store their interval anchored at the start of the service day so totals, receipts and history are unchanged, and they never count as overlapping other participation. Reports show no start or end time for them.
+
+## Discord commands
+
+Members whose roster record is linked to their Discord account (with Core's `/pair`) can use three Outreach commands in the Discord server configured in **Settings > Integrations**. Core checks the server, the verified integration and that Outreach is enabled before Outreach sees the command, and every reply is private to the member.
+
+- **`/outreach-submit`** records completed participation in a dated activity, by its reference or exact title, with local start and end times and optional private task notes for Staff. The reply is a receipt.
+- **`/outreach-correction`** asks Staff to review participation, optionally naming a receipt or a service date. Totals change only after Staff review.
+- **`/outreach-report`** shows the member their own counted participation. With an Outreach reporting start date (operational baseline) set in **Settings > Outreach > General**, it gives hours, distinct activities and entries since that date, by activity type (Event, Team Support, Other Service), and an all-time line; without one, all-time totals by type. Then up to 5 of the most recent counted entries with their full receipt references, to paste into `/outreach-correction receipt:`, and the number of open correction requests. Hours are total minutes divided by 60 to two decimals, as the Outreach page shows them. Voided entries and task notes are never included, activity titles lose Discord formatting characters, and the reply stays under Discord's 2,000-character limit. It takes no options and reads the member's account, totals, recent entries and open corrections as one D1 batch. A Discord account that is not linked to exactly one active roster member is told to use `/pair` or ask an Operator to check the roster link.
 
 ## Checking team numbers with FIRST
 
@@ -106,7 +115,7 @@ Patch notes for each stable and beta release are in [docs/releases](docs/release
 
 ## Continuous integration
 
-**Verify** (`.github/workflows/ci.yml`) runs on every push to `main`, every pull request and on demand. It checks out the LancerLogin Core commit pinned in `.github/plugin-release.json` from the public [isriah/LancerLogin](https://github.com/isriah/LancerLogin) repository (currently Core `v2.1.0-beta.7`, pinned by its full commit SHA; the tag is recorded beside it for people), composes this plugin commit into it and runs Core's acceptance module gate for `hour-tracking` (`npm run verify:module -- acceptance hour-tracking`): the plugin's Core-side tests, browser specs, typechecks and builds. Plugin tests cannot skip in CI.
+**Verify** (`.github/workflows/ci.yml`) runs on every push to `main`, every pull request and on demand. It checks out the LancerLogin Core commit pinned in `.github/plugin-release.json` from the public [isriah/LancerLogin](https://github.com/isriah/LancerLogin) repository (currently Core `v2.1.0-beta.10`, pinned by its full commit SHA; the tag is recorded beside it for people), composes this plugin commit into it and runs Core's acceptance module gate for `hour-tracking` (`npm run verify:module -- acceptance hour-tracking`): the plugin's Core-side tests, browser specs, typechecks and builds. Plugin tests cannot skip in CI.
 
 Verify also runs a second, non-blocking entry, **verify against Core main**: the same checks with this commit composed into the `main` branch of that Core repository. It shows a change in Core that breaks this plugin before the pin moves. Core main can change without this plugin changing, so a failure there doesn't block pull requests, releases or nightly builds (they require the pinned `verify` job), but it is a warning to act on: fix the plugin, or report the Core change.
 

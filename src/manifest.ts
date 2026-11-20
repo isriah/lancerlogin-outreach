@@ -80,6 +80,7 @@ const manifest = defineModuleManifest({
       { name: "receipt", description: "Participation receipt reference", type: 3 },
       { name: "date", description: "Service date in YYYY-MM-DD format", type: 3 },
     ] },
+    { name: "outreach-report", type: 1, description: "Privately view your Outreach participation summary" },
   ],
   reportDatasets: [
     { id: "outreach.members", label: "Members - Outreach", description: "Member-level Outreach participation totals.", rowIdentity: "core.member.identity", capability: "hours.manage", fields: outreachMemberFields, filters: ["period", "roster", "labels", "outreach-labels"], groupBy: ["core.member.identity"], defaultColumns: ["core.member.name", "outreach.member.minutes", "outreach.member.entries", "outreach.member.activities"], defaultSort: { field: "core.member.name", direction: "asc" }, relationships: [{ dataset: "core.members", localField: "core.member.identity", foreignField: "core.member.identity" }] },
