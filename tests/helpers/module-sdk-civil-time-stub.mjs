@@ -83,3 +83,9 @@ export function elapsedIntegerMinutes(startMilliseconds, endMilliseconds) {
 
 // SDK 1.4.0 adds the CSV import kit to this entry.
 export * from "./module-sdk-csv-import-stub.mjs";
+
+// Enough of the manifest helpers for a test to import src/manifest.ts and read its declarations; Core validates the real
+// manifest in a composed build.
+export const defineModuleManifest = (definition) => definition;
+export const coreMemberReportFieldDefinitions = () => [];
+export const reportFilterOperators = () => [];

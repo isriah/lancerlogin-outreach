@@ -14,6 +14,7 @@ const coreTables = `
   CREATE TABLE members (id TEXT PRIMARY KEY, installation_id TEXT NOT NULL REFERENCES installations(id), external_id TEXT NOT NULL, first_name TEXT NOT NULL, last_name TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1, discord_user_id TEXT);
   CREATE TABLE organization_settings (installation_id TEXT PRIMARY KEY REFERENCES installations(id), time_zone TEXT NOT NULL, organization_name TEXT NOT NULL DEFAULT 'Synthetic Robotics', subtitle TEXT, logo_data TEXT, primary_color TEXT NOT NULL DEFAULT '#123456', secondary_color TEXT NOT NULL DEFAULT '#654321', logo_backdrop TEXT NOT NULL DEFAULT 'auto');
   CREATE TABLE audit_log (id TEXT PRIMARY KEY, installation_id TEXT NOT NULL REFERENCES installations(id), actor_user_id TEXT REFERENCES users(id), action TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT, metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
+  CREATE TABLE module_report_baselines (installation_id TEXT NOT NULL REFERENCES installations(id), module_id TEXT NOT NULL, starts_on TEXT, revision INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL, PRIMARY KEY (installation_id, module_id));
 `;
 
 /** Rows a freshly enabled installation has (the plugin's freshEnable), plus synthetic members and an admin. */

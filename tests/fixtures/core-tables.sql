@@ -2,6 +2,8 @@
 -- Outreach tests. Plugin tests apply tests/fixtures/core-hours-schema.sql and this plugin's migrations on top.
 -- Dumped from a database migrated with every migration of LancerLogin Core v2.1.0-beta.5 (commit 86640f17),
 -- through 0094_module_update_failures.sql. Tables: audit_log, installations, meeting_weight_categories, meetings, members, organization_settings, platform_modules, users.
+-- module_report_baselines, which /outreach-report reads, is appended from Core's 0096_module_report_baselines.sql
+-- (first in Core v2.1.0-beta.9).
 -- Core's own triggers are left out: they maintain Core bookkeeping tables that are not here.
 
 CREATE TABLE installations (
@@ -149,3 +151,12 @@ CREATE INDEX idx_meeting_weight_categories_order
 ON meeting_weight_categories (installation_id, active, position, name);
 
 CREATE INDEX platform_modules_cleanup_due ON platform_modules(phase, delete_after, installation_id, module_id);
+
+CREATE TABLE module_report_baselines (
+  installation_id TEXT NOT NULL REFERENCES installations(id) ON DELETE CASCADE,
+  module_id TEXT NOT NULL CHECK (length(module_id) BETWEEN 1 AND 64 AND module_id <> 'attendance'),
+  starts_on TEXT CHECK (starts_on IS NULL OR (length(starts_on) = 10 AND starts_on = date(starts_on))),
+  revision INTEGER NOT NULL DEFAULT 0 CHECK (typeof(revision) = 'integer' AND revision >= 0),
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (installation_id, module_id)
+);
