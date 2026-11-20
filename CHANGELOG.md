@@ -4,7 +4,7 @@ All notable changes to the LancerLogin Outreach plugin. Versions follow LancerLo
 
 ## [1.4.0] - 2026-11-20
 
-Members can run **`/outreach-report`** in Discord to privately see their own counted Outreach participation: hours, distinct activities and entries since the Outreach reporting start date (operational baseline), by activity type, with an all-time line (all-time totals when no start date is set), their 5 most recent entries with full receipt references for `/outreach-correction`, and how many correction requests are still open. It needs a Discord account linked to exactly one active roster member. No migration; Outreach backup version 5 is unchanged. Supports LancerLogin Core `>=2.1.0-beta.9 <3.0.0` (module SDK 1.5.0 or later). See [v1.4.0](docs/releases/v1.4.0.md).
+Members can run **`/outreach-report`** in Discord to privately see their own counted Outreach participation: hours, distinct activities and entries since the Outreach reporting start date (operational baseline), by activity type, with an all-time line (all-time totals when no start date is set), their 5 most recent entries with full receipt references for `/outreach-correction`, and how many correction requests are still open. It needs a Discord account linked to exactly one active roster member. No migration; Outreach backup version 5 and the supported LancerLogin Core range `>=2.1.0-beta.7 <3.0.0` (module SDK 1.5.0) are unchanged. See [v1.4.0](docs/releases/v1.4.0.md).
 
 ## [1.3.1] - 2026-11-20
 
