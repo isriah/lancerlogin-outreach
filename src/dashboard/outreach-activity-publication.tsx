@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { resolveCivilTime, type CivilTimeOccurrence } from "@lancerlogin/module-sdk";
 import { dashboardApi as api } from "@lancerlogin/module-sdk/dashboard";
 import { AppLink, usePath } from "@lancerlogin/module-sdk/dashboard";
+import { useTimeFieldTab } from "./outreach-time-field-tab.ts";
 import { backfillButtonText, backfillConfirmText, backfillDestinations, backfillHelp, backfillResultText, deliveryText, integrationsHref, integrationsLinkText, latestProblemText, noBackfillDestinationText, notSetUpText, parsePublicationDestinations, publicationProviderOrder, retryingAtText, switchDisabled, switchLabel, switchNotice, type BackfillPage, type PublicationDestinations, type PublicationProvider } from "./outreach-publication-destinations.ts";
 
 export type OutreachEventSchedule = {
@@ -32,9 +33,9 @@ export type OutreachActivityPublication = {
 type Notice = { tone: "success" | "error"; text: string };
 
 function EventTimeField({ label, date, timeZone, time, occurrence, disabled, onTime, onOccurrence }: { label: string; date: string; timeZone: string; time: string | null; occurrence: CivilTimeOccurrence | null; disabled: boolean; onTime: (time: string | null) => void; onOccurrence: (occurrence: CivilTimeOccurrence | null) => void }) {
-  let repeated = false; let missing = false;
+  const tab = useTimeFieldTab(); let repeated = false; let missing = false;
   if (time && date) try { const candidates = resolveCivilTime({ date, time, timeZone }); repeated = candidates.length > 1; missing = candidates.length === 0; } catch { /* Server validates incomplete schedule fields. */ }
-  return <div className="outreach-stack"><label>{label}<input className="ui-control" type="time" step={300} value={time ?? ""} disabled={disabled} onChange={event => { onTime(event.target.value || null); }} /></label>
+  return <div className="outreach-stack"><label>{label}<input className="ui-control" type="time" step={300} value={time ?? ""} disabled={disabled} {...tab} onChange={event => { onTime(event.target.value || null); }} /></label>
     {missing && <p className="field-help" role="alert">This local time does not exist because the clock changes.</p>}
     {repeated && <label>{label} occurrence<select className="ui-native-select" required disabled={disabled} value={occurrence ?? ""} onChange={event => onOccurrence(event.target.value as CivilTimeOccurrence || null)}><option value="">Choose occurrence</option><option value="earlier">First occurrence</option><option value="later">Second occurrence</option></select></label>}
   </div>;
