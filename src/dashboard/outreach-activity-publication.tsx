@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { resolveCivilTime, type CivilTimeOccurrence } from "@lancerlogin/module-sdk";
 import { dashboardApi as api } from "@lancerlogin/module-sdk/dashboard";
 import { AppLink, usePath } from "@lancerlogin/module-sdk/dashboard";
-import { useTimeFieldTab } from "./outreach-time-tab.ts";
+import { useTimeFieldTab } from "./outreach-time-field-tab.ts";
 import { backfillButtonText, backfillConfirmText, backfillDestinations, backfillHelp, backfillResultText, deliveryText, integrationsHref, integrationsLinkText, latestProblemText, noBackfillDestinationText, notSetUpText, parsePublicationDestinations, publicationProviderOrder, retryingAtText, switchDisabled, switchLabel, switchNotice, type BackfillPage, type PublicationDestinations, type PublicationProvider } from "./outreach-publication-destinations.ts";
 
 export type OutreachEventSchedule = {

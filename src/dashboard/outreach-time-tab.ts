@@ -6,8 +6,7 @@
 // lands on AM/PM instead of the minutes, and 30, Tab lands on the picker button instead of AM/PM. The page cannot see
 // which segment has focus, so this follows the keys typed into the field and reports the one Tab to ignore: a forward
 // Tab pressed directly after a digit that moved on by itself. Every other key keeps the browser's own behaviour.
-import type React from "react";
-import { useRef } from "react";
+// This file has no React import, so the plugin's own tests can load it; useTimeFieldTab wires it to a field.
 
 /** "after-minute" is where typing leaves the minutes: AM/PM on a 12-hour clock, still the minutes on a 24-hour one. */
 export type TimeSegment = "hour" | "minute" | "after-minute" | "period" | "picker" | "unknown";
@@ -50,39 +49,4 @@ export function timeTabKey(before: TimeTabState, event: TimeTabKey, twelveHour: 
   // The arrow keys move between the segments but never onto the picker button.
   if (event.key === "ArrowLeft" || event.key === "ArrowRight") return { state: settled(state.segment === "picker" ? "picker" : moved(state.segment, event.key === "ArrowLeft" ? -1 : 1, twelveHour, twelveHour ? "period" : "minute")), ignore: false };
   return { state: settled(state.segment), ignore: false };
-}
-
-// Time fields follow the operating system's clock setting on some systems, which the page cannot read. A field that
-// was empty and has had only its hour and minutes typed shows which clock it uses: it has a value on a 24-hour clock
-// and none yet on a 12-hour clock, where AM/PM is still missing. What one field shows holds for every field.
-let observedTwelveHour: boolean | undefined;
-function guessedTwelveHour(): boolean {
-  try { return new Intl.DateTimeFormat(undefined, { hour: "numeric" }).resolvedOptions().hour12 === true; } catch { return true; }
-}
-
-/** Props for a native `<input type="time">` that keep Tab on the segment typing has just moved to. */
-export function useTimeFieldTab() {
-  const state = useRef<TimeTabState>(timeTabStart()); const pointer = useRef(false);
-  // Whether the field was empty when focus arrived, and has since seen only digits and Tab, in known segments.
-  const conclusive = useRef(false); const typedInto = useRef({ hour: false, minute: false });
-  const begin = (segment: TimeSegment, empty: boolean) => { state.current = timeTabStart(segment); conclusive.current = empty && segment === "hour"; typedInto.current = { hour: false, minute: false }; };
-  return {
-    onPointerDown: () => { pointer.current = true; begin("unknown", false); },
-    onFocus: (event: React.FocusEvent<HTMLInputElement>) => {
-      // Focus that arrives by keyboard from an earlier control starts on the hour. A click chooses its own segment.
-      const from = event.relatedTarget; const forward = !pointer.current && from instanceof Node && Boolean(from.compareDocumentPosition(event.currentTarget) & Node.DOCUMENT_POSITION_FOLLOWING);
-      pointer.current = false; begin(forward ? "hour" : "unknown", event.currentTarget.value === "");
-    },
-    onBlur: () => { pointer.current = false; begin("unknown", false); },
-    onKeyDown: (event: React.KeyboardEvent<HTMLInputElement>) => {
-      if (event.nativeEvent.isComposing) return;
-      if (conclusive.current && typedInto.current.hour && typedInto.current.minute) observedTwelveHour = event.currentTarget.value === "";
-      const digit = /^[0-9]$/.test(event.key) && !event.altKey && !event.ctrlKey && !event.metaKey;
-      if (digit && state.current.segment === "hour") typedInto.current.hour = true;
-      else if (digit && state.current.segment === "minute") typedInto.current.minute = true;
-      else if (!["Tab", "Shift"].includes(event.key)) conclusive.current = false;
-      const result = timeTabKey(state.current, event, observedTwelveHour ?? guessedTwelveHour()); state.current = result.state;
-      if (result.ignore) event.preventDefault();
-    },
-  };
 }
