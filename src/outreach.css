@@ -45,6 +45,10 @@
 :where([data-module="hour-tracking"]) .outreach-activity-visibility > fieldset > .checkbox-field { margin: 0; padding: 0 var(--space-2); font-family: var(--font-body); font-size: var(--text-body); font-weight: 400; }
 :where([data-module="hour-tracking"]) .outreach-fieldset { display: grid; gap: var(--space-2); min-width: 0; margin: 0; padding: 0; }
 :where([data-module="hour-tracking"]) .outreach-fieldset > legend { margin: 0 0 var(--space-2); font-family: var(--font-body); font-size: var(--text-body); font-weight: 750; letter-spacing: normal; }
+/* The label choices wrap into columns with no gap between rows: each row is already a full-height touch target. */
+:where([data-module="hour-tracking"]) .outreach-label-picker { grid-template-columns: repeat(auto-fill,minmax(9rem,1fr)); gap: 0 var(--space-3); }
+:where([data-module="hour-tracking"]) .outreach-label-picker > .checkbox-field { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+:where([data-module="hour-tracking"]) .outreach-label-picker > .field-help { grid-column: 1 / -1; }
 .dashboard-page :where([data-module="hour-tracking"]) .ui-form.outreach-activity-create-form > label:not(.checkbox-field),.dashboard-page :where([data-module="hour-tracking"]) .outreach-detail-workspace .ui-form > label:not(.checkbox-field) { font-family: var(--font-body); font-size: var(--text-body); font-weight: 750; }
 :where([data-module="hour-tracking"]) .outreach-detail-workspace > article > .meeting-detail-heading,:where([data-module="hour-tracking"]) .outreach-detail-workspace .meeting-summary { margin: 0; }
 :where([data-module="hour-tracking"]) .outreach-detail-workspace .meeting-detail-navigation { margin-bottom: 0; flex-wrap: wrap; }

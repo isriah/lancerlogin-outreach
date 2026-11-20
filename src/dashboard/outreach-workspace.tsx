@@ -117,7 +117,7 @@ function ActivityCreationDialog({ open, labels, teams, context, onClose, onCreat
 }
 
 function LabelPicker({ labels, selected, onChange }: { labels: OutreachLabel[]; selected: string[]; onChange: (ids: string[]) => void }) {
-  return <fieldset className="outreach-fieldset"><legend>Outreach labels (optional)</legend>{labels.length ? labels.map((label) => <label className="checkbox-field" key={label.id}><input className="ui-checkbox" type="checkbox" checked={selected.includes(label.id)} onChange={(event) => onChange(event.target.checked ? [...selected, label.id] : selected.filter((id) => id !== label.id))} /> {label.name}</label>) : <p className="field-help">No Outreach labels yet. Create one from the Outreach Settings tab or Settings &gt; Outreach, or leave this activity unlabeled.</p>}</fieldset>;
+  return <fieldset className="outreach-fieldset outreach-label-picker"><legend>Outreach labels (optional)</legend>{labels.length ? labels.map((label) => <label className="checkbox-field" key={label.id}><input className="ui-checkbox" type="checkbox" checked={selected.includes(label.id)} onChange={(event) => onChange(event.target.checked ? [...selected, label.id] : selected.filter((id) => id !== label.id))} /> {label.name}</label>) : <p className="field-help">No Outreach labels yet. Create one from the Outreach Settings tab or Settings &gt; Outreach, or leave this activity unlabeled.</p>}</fieldset>;
 }
 
 
